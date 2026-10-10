@@ -152,18 +152,25 @@
     return `${norm(mainArtist)}|${norm(cleanTitle(title))}`;
   }
 
-  /** Drop candidates already in this playlist (by what was pasted or by the saved title/artist). */
+  /** Drop candidates already in this playlist: same title and main artist, or (when Spotify credits the
+   *  song differently, e.g. to its writers) the same title within a year of the same release year. */
   function onlyNew(list: Candidate[]) {
     const have = new Set<string>();
+    const titleYear = new Set<string>();
+    const remember = (artist: string, title: string, year: number | null | undefined) => {
+      have.add(songKey(artist, title));
+      if (year) titleYear.add(`${norm(cleanTitle(title))}|${year}`);
+    };
     for (const r of rows) {
-      have.add(songKey(r.input.artist, r.input.title));
-      have.add(songKey(r.artist, r.title));
+      remember(r.input.artist, r.input.title, r.input.year);
+      remember(r.artist, r.title, r.year);
     }
     const out: Candidate[] = [];
     for (const c of list) {
-      const k = songKey(c.artist, c.title);
-      if (have.has(k)) continue;
-      have.add(k);
+      const t = norm(cleanTitle(c.title));
+      const nearYear = !!c.year && [c.year - 1, c.year, c.year + 1].some((y) => titleYear.has(`${t}|${y}`));
+      if (have.has(songKey(c.artist, c.title)) || nearYear) continue;
+      remember(c.artist, c.title, c.year);
       out.push(c);
     }
     return out;
