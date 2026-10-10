@@ -8,16 +8,63 @@ export class SpotifyError extends Error {
   }
 }
 
-export async function api<T = unknown>(path: string, init: RequestInit = {}, retries = 2): Promise<T> {
-  const token = await getAccessToken();
-  const res = await fetch(path.startsWith('http') ? path : BASE + path, {
-    ...init,
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init.headers || {}) },
-  });
-  if (res.status === 429 && retries > 0) {
-    const wait = Number(res.headers.get('Retry-After') || '2');
-    await new Promise((r) => setTimeout(r, Math.min(wait, 30) * 1000));
-    return api<T>(path, init, retries - 1);
+/** Spotify asked us to stop for longer than we're willing to wait inline. */
+export class RateLimitError extends Error {
+  constructor(public retryAfterSec: number) {
+    super(`Spotify is rate-limiting requests. Try again in ${formatWait(retryAfterSec)}.`);
+  }
+}
+
+export function formatWait(sec: number) {
+  if (sec < 90) return `${Math.max(1, Math.round(sec))} seconds`;
+  if (sec < 5400) return `${Math.round(sec / 60)} minutes`;
+  return `${Math.round(sec / 3600)} hours`;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Reported while waiting out a 429, so the UI can show it. */
+export const rateLimit = { until: 0 };
+
+// Web API calls that aren't playback go through a slow lane: at most one every MIN_GAP ms,
+// so checking a long song list stays under Spotify's rolling rate limit.
+const MIN_GAP = 700;
+let lane: Promise<unknown> = Promise.resolve();
+let lastCall = 0;
+function throttled<T>(fn: () => Promise<T>): Promise<T> {
+  const run = async () => {
+    const wait = Math.max(lastCall + MIN_GAP, rateLimit.until) - Date.now();
+    if (wait > 0) await sleep(wait);
+    lastCall = Date.now();
+    return fn();
+  };
+  const p = lane.then(run, run);
+  lane = p.catch(() => {});
+  return p;
+}
+
+const MAX_INLINE_WAIT = 90; // seconds: longer waits are handed back to the caller
+
+export async function api<T = unknown>(path: string, init: RequestInit = {}, attempt = 0): Promise<T> {
+  const isPlayback = path.startsWith('/me/player');
+  const doFetch = async () => {
+    const token = await getAccessToken();
+    return fetch(path.startsWith('http') ? path : BASE + path, {
+      ...init,
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...(init.headers || {}) },
+    });
+  };
+  // Playback must react immediately; everything else queues in the slow lane.
+  const res = isPlayback ? await doFetch() : await throttled(doFetch);
+  if (res.status === 429) {
+    const retryAfter = Number(res.headers.get('Retry-After')) || 5 * (attempt + 1);
+    if (retryAfter > MAX_INLINE_WAIT || attempt >= 4) {
+      rateLimit.until = Date.now() + retryAfter * 1000;
+      throw new RateLimitError(retryAfter);
+    }
+    rateLimit.until = Date.now() + retryAfter * 1000;
+    await sleep(retryAfter * 1000);
+    return api<T>(path, init, attempt + 1);
   }
   if (!res.ok) {
     let msg = `${res.status}`;

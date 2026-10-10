@@ -185,7 +185,8 @@ export async function findOnSpotify(c: Candidate): Promise<Scored[]> {
   const title = c.title.replace(/"/g, '');
   const artist = c.artist.replace(/"/g, '');
   let results = await searchTracks(`track:"${title}" artist:"${artist}"`, 10);
-  if (results.length < 3) {
+  // A second, looser search only when the exact one found nothing: saves Spotify requests.
+  if (results.length === 0) {
     const more = await searchTracks(`${title} ${artist}`, 10);
     const seen = new Set(results.map((r) => r.id));
     results = [...results, ...more.filter((r) => !seen.has(r.id))];

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { playlists, exportPlaylist, type Song } from '../../lib/playlists.svelte';
-  import { getTrack, parseSpotifyId, playlistTracks, type SpTrack } from '../../lib/spotify/api';
+  import { formatWait, getTrack, parseSpotifyId, playlistTracks, RateLimitError, type SpTrack } from '../../lib/spotify/api';
   import { player } from '../../lib/spotify/player.svelte';
   import { connectSpotify } from '../../lib/spotify/auth';
   import { router } from '../../lib/router.svelte';
@@ -11,6 +11,7 @@
     parseAiList,
     recheckWith,
     cleanTitle,
+    norm,
     type Candidate,
     type Checked,
     type Confidence,
@@ -145,6 +146,29 @@
     };
   }
 
+  /** "Same song" key: title and main artist, ignoring case, accents, punctuation, "the" and featured artists. */
+  function songKey(artist: string, title: string) {
+    const mainArtist = artist.split(/\s+(?:feat\.?|ft\.?|featuring|&|and|with|vs\.?)\s+|,/i)[0];
+    return `${norm(mainArtist)}|${norm(cleanTitle(title))}`;
+  }
+
+  /** Drop candidates already in this playlist (by what was pasted or by the saved title/artist). */
+  function onlyNew(list: Candidate[]) {
+    const have = new Set<string>();
+    for (const r of rows) {
+      have.add(songKey(r.input.artist, r.input.title));
+      have.add(songKey(r.artist, r.title));
+    }
+    const out: Candidate[] = [];
+    for (const c of list) {
+      const k = songKey(c.artist, c.title);
+      if (have.has(k)) continue;
+      have.add(k);
+      out.push(c);
+    }
+    return out;
+  }
+
   async function copyPrompt() {
     await navigator.clipboard.writeText(aiPrompt(count, theme));
     copied = true;
@@ -155,8 +179,12 @@
     error = null;
     try {
       const list = parseAiList(aiText);
-      const existing = new Set(rows.map((r) => `${r.input.artist}|${r.input.title}`.toLowerCase()));
-      rows.push(...list.filter((c) => !existing.has(`${c.artist}|${c.title}`.toLowerCase())).map((c) => newRow(c)));
+      const fresh = onlyNew(list);
+      rows.push(...fresh.map((c) => newRow(c)));
+      saved =
+        fresh.length < list.length
+          ? `Added ${fresh.length} new song${fresh.length === 1 ? '' : 's'}; ${list.length - fresh.length} were already in this playlist.`
+          : null;
       aiText = '';
       touch();
       run();
@@ -233,13 +261,14 @@
         touch();
       } else {
         const candidates = parseAiList(text);
-        const existing = new Set(rows.map((r) => `${r.input.artist}|${r.input.title}`.toLowerCase()));
-        const fresh = candidates.filter((c) => !existing.has(`${c.artist}|${c.title}`.toLowerCase()));
+        const fresh = onlyNew(candidates);
         rows.push(...fresh.map((c) => newRow(c)));
         touch();
-        saved = player.connected
-          ? `Added ${fresh.length} songs from ${file.name}. Checking them on Spotify and MusicBrainz now.`
-          : `Added ${fresh.length} songs from ${file.name}. Connect Spotify to check them.`;
+        const skipped = candidates.length - fresh.length;
+        saved =
+          `Added ${fresh.length} new song${fresh.length === 1 ? '' : 's'} from ${file.name}` +
+          (skipped ? ` (${skipped} were already in this playlist)` : '') +
+          (player.connected ? '. Checking them now.' : '. Connect Spotify to check them.');
         if (player.connected) run();
       }
     } catch (err) {
@@ -265,6 +294,12 @@
         try {
           apply(row, row.fromTrack ? await checkTrack(row.fromTrack) : await checkCandidate(row.input));
         } catch (e) {
+          if (e instanceof RateLimitError) {
+            // Not this song's fault: put it back and carry on when Spotify allows.
+            row.state = 'queued';
+            pauseForRateLimit(e.retryAfterSec);
+            break;
+          }
           row.notes = [`check failed: ${(e as Error).message}`];
           row.confidence = 'red';
         }
@@ -275,6 +310,40 @@
       running = false;
     }
   }
+
+  let waitMsg = $state<string | null>(null);
+  let resumeTimer: number | undefined;
+
+  function pauseForRateLimit(sec: number) {
+    clearTimeout(resumeTimer);
+    const resumeAt = new Date(Date.now() + sec * 1000);
+    const time = resumeAt.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    if (sec <= 30 * 60) {
+      waitMsg = `Spotify asked JPlay to slow down. Checking continues by itself in ${formatWait(sec)} (around ${time}). Your progress is kept.`;
+      resumeTimer = window.setTimeout(() => {
+        waitMsg = null;
+        run();
+      }, sec * 1000 + 1000);
+    } else {
+      waitMsg = `Spotify has paused searches for this app for ${formatWait(sec)} (until around ${time}). Your progress is kept: come back then and click Resume checking.`;
+    }
+  }
+
+  /** Re-queue songs whose check failed (e.g. a network error or an earlier rate limit). */
+  function retryFailed() {
+    for (const r of rows) {
+      if (r.state === 'done' && r.notes.some((n) => n.startsWith('check failed'))) {
+        r.state = 'queued';
+        r.notes = [];
+      }
+    }
+    touch();
+    run();
+  }
+
+  const failedCount = $derived(rows.filter((r) => r.state === 'done' && r.notes.some((n) => n.startsWith('check failed'))).length);
+
+  $effect(() => () => clearTimeout(resumeTimer));
 
   function apply(row: Row, r: Checked) {
     row.title = r.title;
@@ -468,11 +537,15 @@
           {#if running}
             <button class="btn small" onclick={() => (stopRequested = true)}>Pause checking</button>
           {:else if counts.pending}
-            <button class="btn small" onclick={run}>Resume checking</button>
+            <button class="btn small" onclick={() => { clearTimeout(resumeTimer); waitMsg = null; run(); }}>Resume checking</button>
+          {/if}
+          {#if failedCount && !running}
+            <button class="btn small" onclick={retryFailed}>Retry {failedCount} failed</button>
           {/if}
           <label class="check"><input type="checkbox" checked={filter === 'check'} onchange={(e) => (filter = e.currentTarget.checked ? 'check' : 'all')} /> Only songs that need a look</label>
         </div>
       </div>
+      {#if waitMsg}<p class="notice wait">{waitMsg}</p>{/if}
       {#if running}<p class="muted note">MusicBrainz allows about one lookup per second, so this takes a couple of seconds per song.</p>{/if}
 
       <div class="table-wrap card">
@@ -673,6 +746,10 @@
   .note {
     font-size: 0.85rem;
     margin: 0 0 0.5rem;
+  }
+  .wait {
+    margin: 0 0 0.75rem;
+    border-left: 4px solid var(--gold);
   }
   .table-wrap {
     overflow-x: auto;
