@@ -2,6 +2,7 @@
 // Cards on the table are tracked by the players, not by the app.
 
 import { playlists, type Song } from './playlists.svelte';
+import { api } from './server';
 
 export interface Options {
   startTokens: number;
@@ -63,9 +64,13 @@ interface Saved {
   turn: Turn | null;
   played: string[];
   history: HistoryEntry[];
+  startedAt: number;
+  savedAt: number;
 }
 
-const KEY = 'jplay.game';
+/** A game in progress is kept this long after it was last played. */
+export const SAVE_DAYS = 7;
+const SAVE_MS = SAVE_DAYS * 86_400_000;
 const OPTIONS_KEY = 'jplay.options';
 
 function load<T>(key: string): T | null {
@@ -90,6 +95,9 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
+const fresh = (s: Saved | null | undefined): s is Saved =>
+  !!s && s.phase === 'game' && !!s.players?.length && Date.now() - (s.savedAt || 0) < SAVE_MS;
+
 class Game {
   phase = $state<'setup' | 'game'>('setup');
   options = $state<Options>({ ...DEFAULT_OPTIONS, ...(load<Partial<Options>>(OPTIONS_KEY) ?? {}) });
@@ -99,6 +107,19 @@ class Game {
   turn = $state<Turn | null>(null);
   played = $state<string[]>([]);
   history = $state<HistoryEntry[]>([]);
+  startedAt = $state(0);
+  savedAt = $state(0);
+
+  /** Loaded for the current user (local copy and server save checked). */
+  ready = $state(false);
+  /** This game came back from a save (crash, reload, other device). */
+  restored = $state(false);
+  /** Server save status of the game in progress. */
+  sync = $state<'idle' | 'saving' | 'saved' | 'failed'>('idle');
+
+  private userId: string | null = null;
+  private saveTimer: number | undefined;
+  private stopPersist: (() => void) | null = null;
 
   active = $derived(this.players.find((p) => p.id === this.turn?.playerId) ?? null);
 
@@ -122,37 +143,142 @@ class Game {
     !!this.active && !!this.turn && !this.turn.revealed && this.active.tokens >= this.options.skipCost,
   );
 
-  constructor() {
-    const saved = load<Saved>(KEY);
-    if (saved) {
-      this.phase = saved.phase;
-      this.playlistIds = saved.playlistIds ?? [];
-      this.names = saved.names?.length ? saved.names : ['', ''];
-      this.players = saved.players ?? [];
-      this.turn = saved.turn ?? null;
-      this.played = saved.played ?? [];
-      this.history = saved.history ?? [];
+  private get key() {
+    return `jplay.game.${this.userId}`;
+  }
+
+  /** Load the user's saved game: whichever is newer, this browser's copy or the server's. */
+  async attach(userId: string) {
+    if (this.userId === userId) return;
+    this.detach();
+    this.userId = userId;
+    try {
+      localStorage.removeItem('jplay.game'); // pre-accounts save format
+    } catch {
+      /* ignore */
     }
-    $effect.root(() => {
+    const local = load<Saved>(this.key);
+    const remote = await api
+      .get<{ game: Saved | null }>('/game')
+      .then((r) => r.game)
+      .catch(() => null);
+    const candidates = [local, remote].filter(fresh).sort((a, b) => b.savedAt - a.savedAt);
+    const best = candidates[0];
+    if (best) {
+      this.apply(best);
+      this.restored = true;
+      this.sync = remote && remote.savedAt >= best.savedAt ? 'saved' : 'idle';
+    } else if (local) {
+      // No game in progress: keep the last setup (names, playlists) for convenience.
+      this.names = local.names?.length ? local.names : ['', ''];
+      this.playlistIds = local.playlistIds ?? [];
+    }
+    this.ready = true;
+    this.persist();
+    if (best && this.sync !== 'saved') this.saveSoon(0);
+  }
+
+  /** Forget everything in memory (logout). The saves stay. */
+  detach() {
+    this.stopPersist?.();
+    this.stopPersist = null;
+    clearTimeout(this.saveTimer);
+    this.userId = null;
+    this.ready = false;
+    this.restored = false;
+    this.phase = 'setup';
+    this.players = [];
+    this.turn = null;
+    this.played = [];
+    this.history = [];
+    this.names = ['', ''];
+    this.playlistIds = [];
+    this.sync = 'idle';
+  }
+
+  private apply(s: Saved) {
+    this.phase = s.phase;
+    if (s.options) this.options = { ...DEFAULT_OPTIONS, ...s.options };
+    this.playlistIds = s.playlistIds ?? [];
+    this.names = s.names?.length ? s.names : ['', ''];
+    this.players = s.players ?? [];
+    this.turn = s.turn ?? null;
+    this.played = s.played ?? [];
+    this.history = s.history ?? [];
+    this.startedAt = s.startedAt || s.savedAt || Date.now();
+    this.savedAt = s.savedAt || Date.now();
+  }
+
+  private snapshot(): Saved {
+    return $state.snapshot({
+      phase: this.phase,
+      options: this.options,
+      playlistIds: this.playlistIds,
+      names: this.names,
+      players: this.players,
+      turn: this.turn,
+      played: this.played,
+      history: this.history,
+      startedAt: this.startedAt,
+      savedAt: Date.now(),
+    }) as Saved;
+  }
+
+  /** Save on every change: right away in this browser, shortly after on the server. */
+  private persist() {
+    this.stopPersist = $effect.root(() => {
+      let first = true;
       $effect(() => {
-        const data: Saved = $state.snapshot({
-          phase: this.phase,
-          options: this.options,
-          playlistIds: this.playlistIds,
-          names: this.names,
-          players: this.players,
-          turn: this.turn,
-          played: this.played,
-          history: this.history,
-        }) as Saved;
+        const data = this.snapshot();
         try {
-          localStorage.setItem(KEY, JSON.stringify(data));
+          localStorage.setItem(this.key, JSON.stringify(data));
           localStorage.setItem(OPTIONS_KEY, JSON.stringify(data.options));
         } catch {
-          /* ignore */
+          /* storage full or blocked: the server copy still works */
         }
+        if (first) {
+          first = false;
+          return;
+        }
+        if (data.phase === 'game') this.saveSoon();
       });
     });
+  }
+
+  private saveSoon(delay = 800) {
+    clearTimeout(this.saveTimer);
+    this.saveTimer = window.setTimeout(() => this.saveNow(), delay);
+  }
+
+  private async saveNow() {
+    if (!this.userId || this.phase !== 'game') return;
+    const data = this.snapshot();
+    this.sync = 'saving';
+    try {
+      await api.put('/game', { state: data });
+      this.savedAt = data.savedAt;
+      this.sync = 'saved';
+    } catch {
+      this.sync = 'failed';
+      this.saveSoon(10_000); // keep trying; the local copy is safe meanwhile
+    }
+  }
+
+  /** Last-chance save when the tab closes. */
+  flush() {
+    if (!this.userId || this.phase !== 'game') return;
+    clearTimeout(this.saveTimer);
+    try {
+      fetch('/api/game', {
+        method: 'PUT',
+        keepalive: true,
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: this.snapshot() }),
+      });
+    } catch {
+      /* ignore */
+    }
   }
 
   private cap(n: number) {
@@ -184,6 +310,8 @@ class Game {
     }));
     this.played = [];
     this.history = [];
+    this.startedAt = Date.now();
+    this.restored = false;
     this.phase = 'game';
     this.newTurn(this.players[0].id);
   }
@@ -302,11 +430,19 @@ class Game {
     if (this.turn) this.turn.stealers = this.turn.stealers.filter((x) => x !== id);
   }
 
+  /** End the game: the save is deleted here and on the server. */
   end() {
+    clearTimeout(this.saveTimer);
     this.names = this.players.map((p) => p.name);
     if (this.names.length < 2) this.names.push('');
     this.phase = 'setup';
     this.turn = null;
+    this.players = [];
+    this.played = [];
+    this.history = [];
+    this.restored = false;
+    this.sync = 'idle';
+    api.del('/game').catch(() => {});
   }
 }
 

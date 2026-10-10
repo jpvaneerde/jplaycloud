@@ -39,6 +39,7 @@ npm run dev          # web app on http://127.0.0.1:5173 (Spotify only accepts 12
 | `DATA_DIR` | `./data` | Where `jplay.db` is kept. |
 | `INVITES_PER_USER` | `5` | Invites a new player gets. |
 | `INVITE_DAYS` / `SESSION_DAYS` | `14` / `30` | How long invites and logins last. |
+| `GAME_KEEP_DAYS` | `7` | How long a game in progress is kept after the last turn. |
 | `OIDC_GOOGLE_CLIENT_ID` / `_SECRET` | none | Turns on "Log in with Google". |
 | `OIDC_MICROSOFT_CLIENT_ID` / `_SECRET` | none | Turns on "Log in with Microsoft". |
 | `OIDC_MICROSOFT_TENANT` | `common` | Use a tenant ID to allow only your own directory. |
@@ -86,7 +87,11 @@ own Spotify playlists, or a JSON file. Every player sees the published ones when
 - The small −/+ buttons on each player fix token counts by hand.
 - **Keyboard:** Space = play/pause, R = reveal, S = skip, N = next turn, Enter = reveal, then next.
 
-All of this can be changed under Game options. The game survives a page reload.
+All of this can be changed under Game options.
+
+**Saved games:** a game in progress is saved after every move, both in the browser and on the JPlay server under
+your account. After a crash, a reload, or a log-in on another computer, JPlay offers to continue where you left off.
+The save is deleted when you end the game, or 7 days after the last turn (`GAME_KEEP_DAYS`).
 
 ## Deploy
 

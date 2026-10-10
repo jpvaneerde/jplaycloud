@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { DATA_DIR } from './config.ts';
+import { DATA_DIR, GAME_KEEP_DAYS } from './config.ts';
 
 mkdirSync(DATA_DIR, { recursive: true });
 
@@ -65,6 +65,14 @@ db.exec(`
     updated_at  INTEGER NOT NULL
   );
 
+  -- The game in progress for each user, so it survives a crash or a switch to another computer.
+  CREATE TABLE IF NOT EXISTS games (
+    user_id    TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    state      TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS oidc_states (
     state       TEXT PRIMARY KEY,
     provider    TEXT NOT NULL,
@@ -108,6 +116,7 @@ setInterval(
   () => {
     run('DELETE FROM sessions WHERE expires_at < ?', now());
     run('DELETE FROM oidc_states WHERE created_at < ?', now() - 15 * 60_000);
+    run('DELETE FROM games WHERE updated_at < ?', now() - GAME_KEEP_DAYS * 86_400_000);
   },
   60 * 60_000,
 ).unref();

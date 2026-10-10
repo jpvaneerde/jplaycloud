@@ -11,6 +11,8 @@ export const ADMIN_EMAIL = (env.ADMIN_EMAIL || '').trim().toLowerCase();
 export const INVITES_PER_USER = Number(env.INVITES_PER_USER || 5);
 export const INVITE_DAYS = Number(env.INVITE_DAYS || 14);
 export const SESSION_DAYS = Number(env.SESSION_DAYS || 30);
+/** A game in progress is kept this many days after it was last played. */
+export const GAME_KEEP_DAYS = Number(env.GAME_KEEP_DAYS || 7);
 export const SECURE_COOKIES = PUBLIC_URL.startsWith('https://');
 export const PUBLIC_ORIGIN = new URL(PUBLIC_URL).origin;
 

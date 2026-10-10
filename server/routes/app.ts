@@ -12,7 +12,7 @@ import {
   type Invite,
   type User,
 } from '../auth.ts';
-import { INVITE_DAYS, PUBLIC_URL } from '../config.ts';
+import { GAME_KEEP_DAYS, INVITE_DAYS, PUBLIC_URL } from '../config.ts';
 import { all, get, now, run, tx } from '../db.ts';
 
 const bad = (msg: string, status: 400 | 403 | 404 | 409 = 400) => new HTTPException(status, { message: msg });
@@ -260,4 +260,55 @@ admin.get('/invites', (c) => {
      ORDER BY i.created_at DESC LIMIT 500`,
   );
   return c.json({ invites: list.map(inviteView) });
+});
+
+/* ---------- the game in progress (one per user) ---------- */
+
+export const gameSave = new Hono<Env>();
+gameSave.use(requireUser);
+
+const MAX_GAME_BYTES = 256 * 1024;
+
+gameSave.get('/', (c) => {
+  const u = c.get('user');
+  const row = get<{ state: string; updated_at: number }>('SELECT state, updated_at FROM games WHERE user_id = ?', u.id);
+  if (!row) return c.json({ game: null });
+  if (row.updated_at < now() - GAME_KEEP_DAYS * 86_400_000) {
+    run('DELETE FROM games WHERE user_id = ?', u.id);
+    return c.json({ game: null });
+  }
+  return c.json({ game: JSON.parse(row.state) });
+});
+
+gameSave.put('/', async (c) => {
+  const u = c.get('user');
+  const text = await c.req.text();
+  if (text.length > MAX_GAME_BYTES) throw bad('That game is too big to save.');
+  const body = JSON.parse(text) as { state?: Record<string, unknown> };
+  const st = body.state;
+  if (!st || typeof st !== 'object' || st.phase !== 'game' || !Array.isArray(st.players)) {
+    throw bad('Only a game in progress can be saved.');
+  }
+  const savedAt = Number(st.savedAt) || now();
+  const startedAt = Number(st.startedAt) || savedAt;
+  // Never let an older copy (e.g. a late request from another tab) overwrite a newer one.
+  const cur = get<{ state: string }>('SELECT state FROM games WHERE user_id = ?', u.id);
+  if (cur) {
+    const curSaved = Number((JSON.parse(cur.state) as { savedAt?: number }).savedAt) || 0;
+    if (curSaved > savedAt) return c.json({ ok: true, kept: 'newer' });
+  }
+  run(
+    `INSERT INTO games (user_id, state, started_at, updated_at) VALUES (?, ?, ?, ?)
+     ON CONFLICT(user_id) DO UPDATE SET state = excluded.state, started_at = excluded.started_at, updated_at = excluded.updated_at`,
+    u.id,
+    JSON.stringify(st),
+    startedAt,
+    now(),
+  );
+  return c.json({ ok: true });
+});
+
+gameSave.delete('/', (c) => {
+  run('DELETE FROM games WHERE user_id = ?', c.get('user').id);
+  return c.json({ ok: true });
 });

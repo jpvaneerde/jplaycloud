@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { router } from './lib/router.svelte';
   import { session } from './lib/session.svelte';
   import { handleCallback } from './lib/spotify/auth';
   import { player } from './lib/spotify/player.svelte';
   import { playlists } from './lib/playlists.svelte';
+  import { game } from './lib/game.svelte';
   import Login from './pages/Login.svelte';
   import Register from './pages/Register.svelte';
   import Play from './pages/Play.svelte';
@@ -45,6 +46,16 @@
     }
   });
 
+  // The user's game in progress (from this browser or the server); forgotten on logout.
+  $effect(() => {
+    const id = session.user?.id;
+    const ready = !booting;
+    untrack(() => {
+      if (id) game.attach(id);
+      else if (ready) game.detach();
+    });
+  });
+
   $effect(() => {
     if (session.user && !playlists.loaded) playlists.load();
     if (session.user && player.connected && player.status === 'loading') {
@@ -52,6 +63,10 @@
     }
   });
 </script>
+
+<!-- Last-chance save when the tab is closed or hidden. -->
+<svelte:window onpagehide={() => game.flush()} />
+<svelte:document onvisibilitychange={() => document.visibilityState === 'hidden' && game.flush()} />
 
 {#if booting}
   <div class="boot" aria-busy="true"></div>
@@ -65,6 +80,8 @@
   <Settings />
 {:else if router.path.startsWith('/admin')}
   <Admin />
+{:else if !game.ready}
+  <div class="boot" aria-busy="true"></div>
 {:else}
   <Play {spotifyError} />
 {/if}

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { game } from '../../lib/game.svelte';
+  import { game, SAVE_DAYS } from '../../lib/game.svelte';
+  import { connectSpotify } from '../../lib/spotify/auth';
   import { player } from '../../lib/spotify/player.svelte';
   import { wakeLock } from '../../lib/wakelock.svelte';
   import Logo from '../../lib/ui/Logo.svelte';
@@ -23,7 +24,8 @@
   const playKey = $derived(turn && song ? `${turn.playerId}|${song.uri}|${game.played.length}` : '');
 
   onMount(() => {
-    if (player.playState === 'idle' && navigator.userActivation?.isActive) armed = true;
+    // Straight from "Start game" counts as a click; a restored game always asks first.
+    if (!game.restored && player.playState === 'idle' && navigator.userActivation?.isActive) armed = true;
     wakeLock.enable();
     return () => wakeLock.disable();
   });
@@ -37,9 +39,20 @@
       .catch((e) => (playError = `Couldn't play this song: ${e.message ?? e}`));
   });
 
+  function ago(t: number) {
+    const m = Math.round((Date.now() - t) / 60_000);
+    if (m < 1) return 'just now';
+    if (m < 60) return `${m} min ago`;
+    const h = Math.round(m / 60);
+    if (h < 24) return `${h} hour${h === 1 ? '' : 's'} ago`;
+    const d = Math.round(h / 24);
+    return `${d} day${d === 1 ? '' : 's'} ago`;
+  }
+
   function arm() {
     player.activate();
     armed = true;
+    game.restored = false;
   }
 
   function endGame() {
@@ -98,6 +111,9 @@
     <Logo height="1.8em" animated={playing} />
     <div class="meta">
       <span class="muted">{game.remaining} songs left</span>
+      <span class="saved" class:failed={game.sync === 'failed'} title="Saved on the JPlay server, so you can carry on after a crash or on another computer">
+        {game.sync === 'saving' ? 'Saving…' : game.sync === 'saved' ? 'Game saved' : game.sync === 'failed' ? 'Not saved to the server, retrying' : ''}
+      </span>
       {#if wakeLock.supported}
         <span class="lock" class:on={wakeLock.active}>{wakeLock.active ? 'Screen stays on' : 'Screen may sleep'}</span>
       {/if}
@@ -227,13 +243,47 @@
     </aside>
   {/if}
 
-  {#if !armed && song}
+  {#if !armed}
     <div class="arm">
-      <button class="btn primary big" onclick={arm}>Continue game</button>
-      <p class="muted">Click to let the browser play sound.</p>
+      <div class="resume card" role="dialog" aria-labelledby="resume-title">
+        {#if game.restored}
+          <p class="kicker">Welcome back</p>
+          <h2 id="resume-title">Your game is still here</h2>
+          <p class="muted">
+            {game.players.length} players: {game.players.map((p) => p.name).join(', ')}.
+            Started {ago(game.startedAt)}, last played {ago(game.savedAt)}.
+            {#if active}It's {active.name}'s turn{revealed ? ', the song was already revealed' : ''}.{/if}
+          </p>
+          <p class="muted small">Saved games are kept for {SAVE_DAYS} days after the last turn, until you end them.</p>
+        {:else}
+          <h2 id="resume-title">Ready when you are</h2>
+          <p class="muted">Click to let the browser play sound.</p>
+        {/if}
+        {#if !player.connected}
+          <p class="notice">Connect Spotify on this computer to hear the songs.</p>
+          <div class="resume-acts">
+            <button class="btn primary big" onclick={connectSpotify}>Connect Spotify</button>
+            {@render endButton()}
+          </div>
+        {:else}
+          <div class="resume-acts">
+            <button class="btn primary big" onclick={arm}>Continue game</button>
+            {#if game.restored}{@render endButton()}{/if}
+          </div>
+        {/if}
+      </div>
     </div>
   {/if}
 </div>
+
+{#snippet endButton()}
+  {#if confirmEnd}
+    <button class="btn danger" onclick={endGame}>Yes, end it for good</button>
+    <button class="btn ghost" onclick={() => (confirmEnd = false)}>Keep it</button>
+  {:else}
+    <button class="btn ghost" onclick={() => (confirmEnd = true)}>End this game</button>
+  {/if}
+{/snippet}
 
 <Options bind:open={optionsOpen} inGame />
 
@@ -529,11 +579,40 @@
     position: fixed;
     inset: 0;
     background: color-mix(in srgb, var(--bg) 88%, transparent);
+    display: grid;
+    place-items: center;
+    padding: 16px;
+    z-index: 10;
+  }
+  .resume {
+    max-width: 520px;
+    padding: 1.75rem;
+    background: var(--bg-2);
     display: flex;
     flex-direction: column;
+    gap: 0.6rem;
+  }
+  .resume h2 {
+    font-size: 1.6rem;
+  }
+  .resume p {
+    margin: 0;
+  }
+  .resume .small {
+    font-size: 0.85rem;
+  }
+  .resume-acts {
+    display: flex;
+    gap: 0.75rem;
     align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-    z-index: 10;
+    margin-top: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .saved {
+    font-size: 0.875rem;
+    color: var(--muted);
+  }
+  .saved.failed {
+    color: var(--danger);
   }
 </style>
