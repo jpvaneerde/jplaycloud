@@ -100,6 +100,11 @@ const userCols = (db.prepare('PRAGMA table_info(users)').all() as { name: string
 if (!userCols.includes('spotify_client_id')) {
   db.exec('ALTER TABLE users ADD COLUMN spotify_client_id TEXT');
 }
+const gameCols = (db.prepare('PRAGMA table_info(finished_games)').all() as { name: string }[]).map((c) => c.name);
+if (!gameCols.includes('status')) {
+  // 'finished' = game history; 'paused' = put aside to resume later
+  db.exec("ALTER TABLE finished_games ADD COLUMN status TEXT NOT NULL DEFAULT 'finished'");
+}
 
 export function now() {
   return Date.now();

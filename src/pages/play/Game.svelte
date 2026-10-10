@@ -124,6 +124,20 @@
     game.end();
   }
 
+  let pausing = $state(false);
+  async function pauseGame() {
+    pausing = true;
+    playError = null;
+    try {
+      await player.stop();
+      await game.pause();
+    } catch (e) {
+      playError = `Couldn't pause the game: ${(e as Error).message}`;
+    } finally {
+      pausing = false;
+    }
+  }
+
   function onKey(e: KeyboardEvent) {
     const t = e.target as HTMLElement;
     if (t.closest('input, textarea, select, dialog') || !armed) return;
@@ -185,6 +199,7 @@
     <nav>
       <button class="btn ghost small" onclick={() => (historyOpen = !historyOpen)} aria-expanded={historyOpen}>Played songs</button>
       <button class="btn ghost small" onclick={() => (optionsOpen = true)}>Options</button>
+      <button class="btn ghost small" onclick={pauseGame} disabled={pausing}>{pausing ? 'Pausing…' : 'Pause game'}</button>
       {#if confirmEnd}
         <button class="btn small danger" onclick={endGame}>Yes, end game</button>
         <button class="btn ghost small" onclick={() => (confirmEnd = false)}>Keep playing</button>
@@ -381,7 +396,7 @@
             Started {ago(game.startedAt)}, last played {ago(game.savedAt)}.
             {#if active}It's {active.name}'s turn{revealed ? ', the song was already revealed' : ''}.{/if}
           </p>
-          <p class="muted small">Saved games are kept for {SAVE_DAYS} days after the last turn, until you end them.</p>
+          <p class="muted small">A game in progress is kept for {SAVE_DAYS} days after the last turn. Pause it to keep it longer: paused games wait under Played games until you resume them.</p>
         {:else}
           <h2 id="resume-title">Ready when you are</h2>
           <p class="muted">Click to let the browser play sound.</p>
@@ -390,12 +405,16 @@
           <p class="notice">Connect Spotify on this computer to hear the songs.</p>
           <div class="resume-acts">
             <button class="btn primary big" onclick={connectSpotify}>Connect Spotify</button>
+            <button class="btn ghost" onclick={pauseGame} disabled={pausing}>Pause for later</button>
             {@render endButton()}
           </div>
         {:else}
           <div class="resume-acts">
             <button class="btn primary big" onclick={arm}>Continue game</button>
-            {#if game.restored}{@render endButton()}{/if}
+            {#if game.restored}
+              <button class="btn ghost" onclick={pauseGame} disabled={pausing}>Pause for later</button>
+              {@render endButton()}
+            {/if}
           </div>
         {/if}
       </div>

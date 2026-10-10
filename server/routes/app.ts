@@ -327,24 +327,38 @@ interface SavedPlayer {
 }
 
 history.get('/', (c) => {
-  const rows = all<{ id: string; started_at: number; ended_at: number; summary: string }>(
-    'SELECT id, started_at, ended_at, summary FROM finished_games WHERE user_id = ? ORDER BY ended_at DESC LIMIT 200',
+  const rows = all<{ id: string; started_at: number; ended_at: number; summary: string; status: string }>(
+    `SELECT id, started_at, ended_at, summary, status FROM finished_games WHERE user_id = ?
+     ORDER BY status = 'paused' DESC, ended_at DESC LIMIT 300`,
     c.get('user').id,
   );
   return c.json({
-    games: rows.map((r) => ({ id: r.id, startedAt: r.started_at, endedAt: r.ended_at, ...JSON.parse(r.summary) })),
+    games: rows.map((r) => ({
+      id: r.id,
+      startedAt: r.started_at,
+      endedAt: r.ended_at,
+      status: r.status,
+      ...JSON.parse(r.summary),
+    })),
   });
 });
 
 history.get('/:id', (c) => {
-  const row = get<{ id: string; started_at: number; ended_at: number; summary: string; state: string }>(
+  const row = get<{ id: string; started_at: number; ended_at: number; summary: string; state: string; status: string }>(
     'SELECT * FROM finished_games WHERE id = ? AND user_id = ?',
     c.req.param('id'),
     c.get('user').id,
   );
   if (!row) throw bad('Game not found.', 404);
   return c.json({
-    game: { id: row.id, startedAt: row.started_at, endedAt: row.ended_at, ...JSON.parse(row.summary), state: JSON.parse(row.state) },
+    game: {
+      id: row.id,
+      startedAt: row.started_at,
+      endedAt: row.ended_at,
+      status: row.status,
+      ...JSON.parse(row.summary),
+      state: JSON.parse(row.state),
+    },
   });
 });
 
@@ -352,7 +366,9 @@ history.post('/', async (c) => {
   const u = c.get('user');
   const text = await c.req.text();
   if (text.length > MAX_HISTORY_BYTES) throw bad('That game is too big to save.');
-  const st = (JSON.parse(text) as { state?: Record<string, unknown> }).state;
+  const body = JSON.parse(text) as { state?: Record<string, unknown>; status?: string };
+  const st = body.state;
+  const status = body.status === 'paused' ? 'paused' : 'finished';
   const players = (st?.players ?? []) as SavedPlayer[];
   if (!st || !Array.isArray(players) || !players.length) throw bad('Nothing to save.');
   const winnerId = (st.winnerId as string | null) ?? null;
@@ -370,15 +386,29 @@ history.post('/', async (c) => {
   const id = randomUUID();
   const startedAt = Number(st.startedAt) || now();
   run(
-    'INSERT INTO finished_games (id, user_id, started_at, ended_at, summary, state) VALUES (?, ?, ?, ?, ?, ?)',
+    'INSERT INTO finished_games (id, user_id, started_at, ended_at, summary, state, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
     id,
     u.id,
     startedAt,
     now(),
     JSON.stringify(summary),
     JSON.stringify(st),
+    status,
   );
   return c.json({ id });
+});
+
+/** Take a paused game off the list and hand its state back, to become the game in progress. */
+history.post('/:id/resume', (c) => {
+  const u = c.get('user');
+  const row = get<{ state: string }>(
+    "SELECT state FROM finished_games WHERE id = ? AND user_id = ? AND status = 'paused'",
+    c.req.param('id'),
+    u.id,
+  );
+  if (!row) throw bad('That paused game is gone.', 404);
+  run('DELETE FROM finished_games WHERE id = ?', c.req.param('id'));
+  return c.json({ state: JSON.parse(row.state) });
 });
 
 history.delete('/:id', (c) => {

@@ -82,6 +82,12 @@
     <button class="btn" onclick={() => (optionsOpen = true)}>Game options</button>
   </div>
 
+  {#if game.justPaused}
+    <p class="notice ok saved-note">
+      Game paused. <a href="/games" onclick={(e) => { game.justPaused = false; router.link(e); }}>Resume it from Played games</a> whenever you like.
+      <button class="btn ghost small" onclick={() => (game.justPaused = false)} aria-label="Dismiss">✕</button>
+    </p>
+  {/if}
   {#if game.justSaved}
     <p class="notice ok saved-note">
       Your last game was saved. <a href="/games" onclick={(e) => { game.justSaved = false; router.link(e); }}>See it in Played games</a>

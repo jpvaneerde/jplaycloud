@@ -172,6 +172,8 @@ class Game {
 
   /** The game that just ended was saved to Played games (shown once on the setup screen). */
   justSaved = $state(false);
+  /** The game was just paused (shown once on the setup screen). */
+  justPaused = $state(false);
 
   /** Set when someone reaches the winning number of cards ('app' scoring). */
   winnerId = $state<string | null>(null);
@@ -584,6 +586,12 @@ class Game {
           .catch(() => {});
       }
     }
+    this.clearGame();
+  }
+
+  /** Back to the setup screen; the in-progress save is deleted. */
+  private clearGame() {
+    clearTimeout(this.saveTimer);
     this.names = this.players.map((p) => p.name);
     if (this.names.length < 2) this.names.push('');
     this.phase = 'setup';
@@ -596,6 +604,25 @@ class Game {
     this.restored = false;
     this.sync = 'idle';
     api.del('/game').catch(() => {});
+  }
+
+  /** Put the game aside: it's listed under Played games as paused, ready to resume. */
+  async pause() {
+    if (!this.userId || this.phase !== 'game') return;
+    clearTimeout(this.saveTimer);
+    await api.post('/history', { state: this.snapshot(), status: 'paused' });
+    this.justPaused = true;
+    this.clearGame();
+  }
+
+  /** Continue a paused game. The caller makes sure no other game is in progress. */
+  async resume(id: string) {
+    const r = await api.post<{ state: Saved }>(`/history/${id}/resume`);
+    this.apply({ ...r.state, phase: 'game', savedAt: Date.now() });
+    this.restored = true; // shows "Welcome back" and asks for a click so audio can play
+    this.justSaved = false;
+    this.justPaused = false;
+    this.saveSoon(0);
   }
 }
 

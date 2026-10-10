@@ -3,7 +3,8 @@
   import Shell from '../lib/ui/Shell.svelte';
   import Timeline from '../lib/ui/Timeline.svelte';
   import { api } from '../lib/server';
-  import type { Player, HistoryEntry } from '../lib/game.svelte';
+  import { router } from '../lib/router.svelte';
+  import { game, type Player, type HistoryEntry } from '../lib/game.svelte';
 
   interface GameSummary {
     id: string;
@@ -13,6 +14,7 @@
     winner: string | null;
     scoring: 'table' | 'app';
     songs: number;
+    status: 'finished' | 'paused';
   }
   interface GameDetail extends GameSummary {
     state: { players: Player[]; history: HistoryEntry[] };
@@ -57,6 +59,33 @@
     confirmDelete = null;
   }
 
+  const paused = $derived(games.filter((g) => g.status === 'paused'));
+  const finished = $derived(games.filter((g) => g.status !== 'paused'));
+
+  let confirmSwap = $state<string | null>(null);
+  let resuming = $state<string | null>(null);
+
+  async function resume(id: string) {
+    // Only one game can be in progress: offer to pause the current one first.
+    if (game.phase === 'game' && confirmSwap !== id) {
+      confirmSwap = id;
+      return;
+    }
+    resuming = id;
+    error = null;
+    try {
+      if (game.phase === 'game') await game.pause();
+      await game.resume(id);
+      router.go('/');
+    } catch (e) {
+      error = (e as Error).message;
+      await load();
+    } finally {
+      resuming = null;
+      confirmSwap = null;
+    }
+  }
+
   const day = (t: number) =>
     new Date(t).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   const time = (t: number) => new Date(t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
@@ -72,18 +101,55 @@
 
 <Shell>
   <h1>Played games</h1>
-  <p class="muted lede">Every game you finish is kept here. Remove the ones you don't want to keep.</p>
+  <p class="muted lede">Every game you finish is kept here, and paused games wait here until you resume them. Remove the ones you don't want to keep.</p>
   {#if error}<p class="notice error">{error}</p>{/if}
 
   {#if !loaded}
     <p class="muted">Loading…</p>
-  {:else if !games.length}
+  {:else}
+    {#if paused.length}
+      <h2>Paused</h2>
+      <ul class="list paused">
+        {#each paused as g (g.id)}
+          <li class="card">
+            <div class="head static">
+              <span class="when">
+                <strong><span class="badge">Paused</span> {day(g.endedAt)}</strong>
+                <small class="muted">Started {day(g.startedAt)} {time(g.startedAt)} · {g.songs} song{g.songs === 1 ? '' : 's'} so far</small>
+              </span>
+              <span class="who">
+                {#each ranked(g) as p, i (i)}
+                  <span class="chip">{p.name}{#if g.scoring === 'app'}<b class="tabular count">{p.cards}</b>{/if}</span>
+                {/each}
+              </span>
+              <span class="pacts">
+                {#if confirmSwap === g.id}
+                  <span class="muted small">Your current game will be paused first.</span>
+                  <button class="btn primary small" onclick={() => resume(g.id)} disabled={!!resuming}>Pause it and resume this</button>
+                  <button class="btn ghost small" onclick={() => (confirmSwap = null)}>Cancel</button>
+                {:else if confirmDelete === g.id}
+                  <button class="btn small danger" onclick={() => remove(g.id)}>Remove for good</button>
+                  <button class="btn ghost small" onclick={() => (confirmDelete = null)}>Keep it</button>
+                {:else}
+                  <button class="btn primary small" onclick={() => resume(g.id)} disabled={!!resuming}>{resuming === g.id ? 'Resuming…' : 'Resume'}</button>
+                  <button class="btn ghost small" onclick={() => (confirmDelete = g.id)}>Remove</button>
+                {/if}
+              </span>
+            </div>
+          </li>
+        {/each}
+      </ul>
+      <h2>Finished</h2>
+    {/if}
+  {/if}
+
+  {#if loaded && !finished.length}
     <div class="empty card">
       <p>No finished games yet. When you end a game, it shows up here with everyone's cards and the songs you played.</p>
     </div>
-  {:else}
+  {:else if finished.length}
     <ul class="list">
-      {#each games as g (g.id)}
+      {#each finished as g (g.id)}
         <li class="card" class:open={open?.id === g.id}>
           <button class="head" onclick={() => show(g.id)} aria-expanded={open?.id === g.id}>
             <span class="when">
@@ -141,6 +207,36 @@
   .lede {
     margin: 0 0 1.25rem;
   }
+  h2 {
+    font-size: 1.15rem;
+    margin: 1.25rem 0 0.6rem;
+  }
+  .badge {
+    font-size: 0.75rem;
+    font-weight: 800;
+    padding: 0.15em 0.55em;
+    border-radius: 999px;
+    background: var(--gold);
+    color: #2a1c00;
+    margin-right: 0.35rem;
+    vertical-align: 0.1em;
+  }
+  .head.static:hover {
+    background: none;
+  }
+  .pacts {
+    margin-left: auto;
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .small {
+    font-size: 0.85rem;
+  }
+  .paused li {
+    border-color: color-mix(in srgb, var(--gold) 40%, transparent);
+  }
   .empty {
     padding: 1.5rem;
   }
@@ -164,6 +260,7 @@
   }
   .head {
     width: 100%;
+    color: inherit;
     display: flex;
     align-items: center;
     gap: 1.25rem;

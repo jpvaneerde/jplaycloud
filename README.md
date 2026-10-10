@@ -103,6 +103,10 @@ the music pauses when the answer is revealed.
 **Played games:** every finished game is saved to the player's account, with each timeline, the tokens and the songs
 played. Find them under Played games, where you can also remove games from the list.
 
+**Pausing:** "Pause game" puts the game aside. It's listed as Paused under Played games, with no time limit, and
+**Resume** picks it up exactly where you left off. Only one game can be in progress at a time, so resuming while
+another game is running pauses that one first.
+
 **Saved games:** a game in progress is saved after every move, both in the browser and on the JPlay server under
 your account. After a crash, a reload, or a log-in on another computer, JPlay offers to continue where you left off.
 The save is deleted when you end the game, or 7 days after the last turn (`GAME_KEEP_DAYS`).
