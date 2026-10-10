@@ -10,6 +10,7 @@
   import Register from './pages/Register.svelte';
   import Play from './pages/Play.svelte';
   import Settings from './pages/Settings.svelte';
+  import Games from './pages/Games.svelte';
   import Admin from './pages/admin/Admin.svelte';
 
   let spotifyError = $state<string | null>(null);
@@ -76,6 +77,8 @@
   <Register />
 {:else if !session.user}
   <div class="boot"></div>
+{:else if router.path === '/games'}
+  <Games />
 {:else if router.path === '/settings'}
   <Settings {spotifyError} />
 {:else if router.path.startsWith('/admin')}

@@ -312,3 +312,76 @@ gameSave.delete('/', (c) => {
   run('DELETE FROM games WHERE user_id = ?', c.get('user').id);
   return c.json({ ok: true });
 });
+
+/* ---------- finished games (history per user) ---------- */
+
+export const history = new Hono<Env>();
+history.use(requireUser);
+
+const MAX_HISTORY_BYTES = 512 * 1024;
+
+interface SavedPlayer {
+  name?: string;
+  tokens?: number;
+  timeline?: unknown[];
+}
+
+history.get('/', (c) => {
+  const rows = all<{ id: string; started_at: number; ended_at: number; summary: string }>(
+    'SELECT id, started_at, ended_at, summary FROM finished_games WHERE user_id = ? ORDER BY ended_at DESC LIMIT 200',
+    c.get('user').id,
+  );
+  return c.json({
+    games: rows.map((r) => ({ id: r.id, startedAt: r.started_at, endedAt: r.ended_at, ...JSON.parse(r.summary) })),
+  });
+});
+
+history.get('/:id', (c) => {
+  const row = get<{ id: string; started_at: number; ended_at: number; summary: string; state: string }>(
+    'SELECT * FROM finished_games WHERE id = ? AND user_id = ?',
+    c.req.param('id'),
+    c.get('user').id,
+  );
+  if (!row) throw bad('Game not found.', 404);
+  return c.json({
+    game: { id: row.id, startedAt: row.started_at, endedAt: row.ended_at, ...JSON.parse(row.summary), state: JSON.parse(row.state) },
+  });
+});
+
+history.post('/', async (c) => {
+  const u = c.get('user');
+  const text = await c.req.text();
+  if (text.length > MAX_HISTORY_BYTES) throw bad('That game is too big to save.');
+  const st = (JSON.parse(text) as { state?: Record<string, unknown> }).state;
+  const players = (st?.players ?? []) as SavedPlayer[];
+  if (!st || !Array.isArray(players) || !players.length) throw bad('Nothing to save.');
+  const winnerId = (st.winnerId as string | null) ?? null;
+  const winner = (players as (SavedPlayer & { id?: string })[]).find((p) => p.id === winnerId);
+  const summary = {
+    players: players.map((p) => ({
+      name: String(p.name ?? '').slice(0, 40),
+      cards: Array.isArray(p.timeline) ? p.timeline.length : 0,
+      tokens: Number(p.tokens) || 0,
+    })),
+    winner: winner?.name ?? null,
+    scoring: (st.options as { scoring?: string } | undefined)?.scoring ?? 'table',
+    songs: Array.isArray(st.history) ? st.history.length : 0,
+  };
+  const id = randomUUID();
+  const startedAt = Number(st.startedAt) || now();
+  run(
+    'INSERT INTO finished_games (id, user_id, started_at, ended_at, summary, state) VALUES (?, ?, ?, ?, ?, ?)',
+    id,
+    u.id,
+    startedAt,
+    now(),
+    JSON.stringify(summary),
+    JSON.stringify(st),
+  );
+  return c.json({ id });
+});
+
+history.delete('/:id', (c) => {
+  run('DELETE FROM finished_games WHERE id = ? AND user_id = ?', c.req.param('id'), c.get('user').id);
+  return c.json({ ok: true });
+});

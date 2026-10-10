@@ -97,7 +97,11 @@ own Spotify playlists, or a JSON file. Every player sees the published ones when
   the answer (equal years count on either side), gives the card to the player or to the first stealer who got it
   right, and announces the winner at the chosen number of cards (default 10, start card included).
 
-All of this can be changed under Game options.
+All of this can be changed under Game options. By default JPlay keeps the cards, everyone starts with 0 tokens, and
+the music pauses when the answer is revealed.
+
+**Played games:** every finished game is saved to the player's account, with each timeline, the tokens and the songs
+played. Find them under Played games, where you can also remove games from the list.
 
 **Saved games:** a game in progress is saved after every move, both in the browser and on the JPlay server under
 your account. After a crash, a reload, or a log-in on another computer, JPlay offers to continue where you left off.

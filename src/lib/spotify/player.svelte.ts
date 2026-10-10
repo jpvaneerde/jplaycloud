@@ -142,6 +142,16 @@ class HiddenPlayer {
     await this.player?.togglePlay();
   }
 
+  /** Pause without forgetting the song (Play resumes where it stopped). */
+  async pause() {
+    if (this.playState !== 'playing' && this.playState !== 'starting') return;
+    try {
+      await this.player?.pause();
+    } catch {
+      /* ignore */
+    }
+  }
+
   async stop() {
     this.expectedUri = null;
     this.playState = 'idle';

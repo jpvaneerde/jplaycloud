@@ -82,6 +82,13 @@
     <button class="btn" onclick={() => (optionsOpen = true)}>Game options</button>
   </div>
 
+  {#if game.justSaved}
+    <p class="notice ok saved-note">
+      Your last game was saved. <a href="/games" onclick={(e) => { game.justSaved = false; router.link(e); }}>See it in Played games</a>
+      <button class="btn ghost small" onclick={() => (game.justSaved = false)} aria-label="Dismiss">✕</button>
+    </p>
+  {/if}
+
   <section class="card speaker" class:ok={ready}>
     <div class="sp-icon" aria-hidden="true"><span></span></div>
     <div class="sp-text">
@@ -193,6 +200,15 @@
   h2 {
     font-size: 1.2rem;
   }
+  .saved-note {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0 0 1rem;
+  }
+  .saved-note .btn {
+    margin-left: auto;
+  }
   .speaker {
     display: flex;
     align-items: center;
@@ -239,7 +255,16 @@
     .grid {
       grid-template-columns: 1fr;
     }
-    .speaker {
+    .saved-note {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0 0 1rem;
+  }
+  .saved-note .btn {
+    margin-left: auto;
+  }
+  .speaker {
       flex-wrap: wrap;
     }
   }

@@ -58,6 +58,7 @@
     {#if o.randomStart}
       <label class="field indent"><span>Start up to this many seconds in</span><input type="number" min="10" max="120" bind:value={o.randomStartMaxSec} /></label>
     {/if}
+    <label class="check"><input type="checkbox" bind:checked={o.pauseOnReveal} /> Pause the music when the answer is revealed</label>
     <label class="field"><span>Stop each song after (seconds, 0 = whole song)</span><input type="number" min="0" max="600" step="5" bind:value={o.songLimitSec} /></label>
   </section>
 

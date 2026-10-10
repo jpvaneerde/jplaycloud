@@ -73,6 +73,17 @@ db.exec(`
     updated_at INTEGER NOT NULL
   );
 
+  -- Finished games kept as history for each user (until they delete them).
+  CREATE TABLE IF NOT EXISTS finished_games (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    started_at INTEGER NOT NULL,
+    ended_at   INTEGER NOT NULL,
+    summary    TEXT NOT NULL,             -- JSON: players, winner, counts (for the list)
+    state      TEXT NOT NULL              -- JSON: the full final game state
+  );
+  CREATE INDEX IF NOT EXISTS finished_games_user ON finished_games (user_id, ended_at DESC);
+
   CREATE TABLE IF NOT EXISTS oidc_states (
     state       TEXT PRIMARY KEY,
     provider    TEXT NOT NULL,

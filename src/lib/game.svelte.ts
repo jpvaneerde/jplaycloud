@@ -22,10 +22,11 @@ export interface Options {
   songLimitSec: number; // 0 = play the whole song
   scoring: 'table' | 'app';
   cardsToWin: number; // 'app' scoring: timeline length that wins (start card included)
+  pauseOnReveal: boolean; // stop the music when the answer is shown
 }
 
 export const DEFAULT_OPTIONS: Options = {
-  startTokens: 2,
+  startTokens: 0,
   maxTokens: 5,
   skipCost: 1,
   stealCost: 1,
@@ -37,8 +38,9 @@ export const DEFAULT_OPTIONS: Options = {
   randomStart: false,
   randomStartMaxSec: 45,
   songLimitSec: 0,
-  scoring: 'table',
+  scoring: 'app',
   cardsToWin: 10,
+  pauseOnReveal: true,
 };
 
 /** A card on a player's timeline. The start card only has a year. */
@@ -99,7 +101,8 @@ interface Saved {
 /** A game in progress is kept this long after it was last played. */
 export const SAVE_DAYS = 7;
 const SAVE_MS = SAVE_DAYS * 86_400_000;
-const OPTIONS_KEY = 'jplay.options';
+// v2: new defaults (JPlay keeps the cards, 0 starting tokens, pause on reveal).
+const OPTIONS_KEY = 'jplay.options.v2';
 
 function load<T>(key: string): T | null {
   try {
@@ -166,6 +169,9 @@ class Game {
   });
 
   remaining = $derived(this.pool.filter((s) => !this.played.includes(s.uri)).length);
+
+  /** The game that just ended was saved to Played games (shown once on the setup screen). */
+  justSaved = $state(false);
 
   /** Set when someone reaches the winning number of cards ('app' scoring). */
   winnerId = $state<string | null>(null);
@@ -534,7 +540,7 @@ class Game {
     if (!this.turn) return;
     if (this.turn.song) {
       this.history.unshift({ song: this.turn.song, playerName: this.active?.name ?? '' });
-      this.history = this.history.slice(0, 50);
+      this.history = this.history.slice(0, 1000);
     }
     const i = this.players.findIndex((p) => p.id === this.turn!.playerId);
     this.newTurn(this.players[(i + 1) % this.players.length].id);
@@ -562,9 +568,22 @@ class Game {
     if (this.turn) this.turn.stealers = this.turn.stealers.filter((x) => x !== id);
   }
 
-  /** End the game: the save is deleted here and on the server. */
+  /** End the game: it goes to the player's game history (if anything was played),
+   *  and the in-progress save is deleted here and on the server. */
   end() {
     clearTimeout(this.saveTimer);
+    if (this.userId && this.players.length) {
+      const final = this.snapshot();
+      if (this.turn?.revealed && this.turn.song) {
+        final.history = [{ song: this.turn.song, playerName: this.active?.name ?? '' }, ...final.history];
+      }
+      if (final.history.length) {
+        api
+          .post('/history', { state: final })
+          .then(() => (this.justSaved = true))
+          .catch(() => {});
+      }
+    }
     this.names = this.players.map((p) => p.name);
     if (this.names.length < 2) this.names.push('');
     this.phase = 'setup';

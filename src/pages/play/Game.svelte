@@ -70,6 +70,14 @@
     placing = !was && appScoring && turn?.stealers.includes(id) ? id : null;
   }
 
+  // Pause the music on reveal (option, on by default) so everyone can talk about the answer.
+  let pausedFor = '';
+  $effect(() => {
+    if (!revealed || !o.pauseOnReveal || !playKey || pausedFor === playKey) return;
+    pausedFor = playKey;
+    player.pause();
+  });
+
   // New turn: the active player places first.
   $effect(() => {
     void turn?.playerId;

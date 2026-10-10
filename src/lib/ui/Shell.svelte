@@ -8,6 +8,7 @@
 
   const links = $derived([
     { href: '/', label: 'Play' },
+    { href: '/games', label: 'Played games' },
     { href: '/settings', label: 'Settings' },
     ...(session.isAdmin ? [{ href: '/admin', label: 'Admin' }] : []),
   ]);

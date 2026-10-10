@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { ADMIN_EMAIL, OIDC_PROVIDERS, PORT, PUBLIC_ORIGIN, PUBLIC_URL, STATIC_DIR } from './config.ts';
 import { userCount } from './auth.ts';
 import { auth, me } from './routes/auth.ts';
-import { admin, gameSave, invites, playlists } from './routes/app.ts';
+import { admin, gameSave, history, invites, playlists } from './routes/app.ts';
 import './db.ts';
 
 const app = new Hono();
@@ -41,6 +41,7 @@ app.route('/api/invites', invites);
 app.route('/api/playlists', playlists);
 app.route('/api/admin', admin);
 app.route('/api/game', gameSave);
+app.route('/api/history', history);
 app.all('/api/*', (c) => c.json({ error: 'Not found' }, 404));
 
 app.onError((err, c) => {
