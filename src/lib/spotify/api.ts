@@ -29,10 +29,14 @@ export const rateLimit = { until: 0 };
 // Web API calls that aren't playback go through a slow lane: at most one every MIN_GAP ms,
 // so checking a long song list stays under Spotify's rolling rate limit.
 const MIN_GAP = 700;
+const MAX_INLINE_WAIT = 90; // seconds: longer waits are handed back to the caller
 let lane: Promise<unknown> = Promise.resolve();
 let lastCall = 0;
 function throttled<T>(fn: () => Promise<T>): Promise<T> {
   const run = async () => {
+    // Still blocked by an earlier long 429: say so right away instead of waiting silently.
+    const blocked = (rateLimit.until - Date.now()) / 1000;
+    if (blocked > MAX_INLINE_WAIT) throw new RateLimitError(blocked);
     const wait = Math.max(lastCall + MIN_GAP, rateLimit.until) - Date.now();
     if (wait > 0) await sleep(wait);
     lastCall = Date.now();
@@ -42,8 +46,6 @@ function throttled<T>(fn: () => Promise<T>): Promise<T> {
   lane = p.catch(() => {});
   return p;
 }
-
-const MAX_INLINE_WAIT = 90; // seconds: longer waits are handed back to the caller
 
 export async function api<T = unknown>(path: string, init: RequestInit = {}, attempt = 0): Promise<T> {
   const isPlayback = path.startsWith('/me/player');
@@ -110,7 +112,7 @@ export async function searchTracks(q: string, limit = 10): Promise<SpTrack[]> {
 }
 
 /** Items of a playlist the user owns or collaborates on (Development Mode rule). */
-export async function playlistTracks(id: string): Promise<SpTrack[]> {
+export async function playlistTracks(id: string, onProgress?: (loaded: number) => void): Promise<SpTrack[]> {
   const out: SpTrack[] = [];
   let url: string | null = `/playlists/${id}/items?limit=50`;
   while (url) {
@@ -119,6 +121,7 @@ export async function playlistTracks(id: string): Promise<SpTrack[]> {
       const t = it.item ?? it.track;
       if (t && t.id) out.push(t);
     }
+    onProgress?.(out.length);
     url = page.next;
   }
   return out;

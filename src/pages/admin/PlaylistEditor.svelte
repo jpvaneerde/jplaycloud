@@ -200,36 +200,81 @@
     }
   }
 
+  let linkBusy = $state<string | null>(null);
+  let linkMsg = $state<string | null>(null);
+
   async function addFromLinks() {
     error = null;
+    linkMsg = null;
+    const parts = linkText.split(/[\s,]+/).filter(Boolean);
+    const lists = parts.filter((l) => parseSpotifyId(l, 'playlist'));
     const tracks: SpTrack[] = [];
+    let unknown = 0;
+    linkBusy = 'Asking Spotify…';
     try {
-      for (const line of linkText.split(/[\s,]+/).filter(Boolean)) {
+      let n = 0;
+      for (const line of parts) {
         const pid = parseSpotifyId(line, 'playlist');
         if (pid) {
-          tracks.push(...(await playlistTracks(pid)));
+          n++;
+          const before = tracks.length;
+          const label = lists.length > 1 ? `playlist ${n} of ${lists.length}` : 'the playlist';
+          linkBusy = `Loading ${label}…`;
+          tracks.push(
+            ...(await playlistTracks(pid, (got) => (linkBusy = `Loading ${label}… ${before + got} songs so far`))),
+          );
           continue;
         }
         const tid = parseSpotifyId(line, 'track');
-        if (tid) tracks.push(await getTrack(tid));
+        if (tid) {
+          linkBusy = `Loading songs… ${tracks.length + 1}`;
+          tracks.push(await getTrack(tid));
+        } else if (!/^\?|^si=/.test(line)) unknown++;
       }
     } catch (e) {
-      error = `Spotify couldn't load that: ${(e as Error).message}. Playlists only work if you own or collaborate on them.`;
+      if (e instanceof RateLimitError) {
+        const time = new Date(Date.now() + e.retryAfterSec * 1000).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+        error = `Spotify has paused requests from this app for ${formatWait(e.retryAfterSec)} (until around ${time}), so the playlist can't be loaded right now. Try again after that; your links stay here.`;
+      } else {
+        const status = (e as { status?: number }).status;
+        error =
+          status === 403 || status === 404
+            ? `Spotify won't share that playlist (${(e as Error).message}). Spotify only lets apps read playlists that are owned by the Spotify account you connected. Make sure that account created the playlist (or copy the songs into a playlist of your own) and try again.`
+            : `Spotify couldn't load that: ${(e as Error).message}.`;
+      }
       return;
+    } finally {
+      linkBusy = null;
     }
     if (!tracks.length) {
-      error = 'Paste Spotify song links, or a link to one of your own playlists.';
+      error = unknown
+        ? "Those don't look like Spotify links. Paste song links or links to your own playlists (Share → Copy link)."
+        : 'That playlist is empty, or Spotify returned no songs for it.';
       return;
     }
-    const have = new Set(rows.map((r) => r.uri));
-    for (const t of tracks) {
-      if (have.has(t.uri)) continue;
-      have.add(t.uri);
-      rows.push(newRow({ title: cleanTitle(t.name), artist: t.artists[0]?.name ?? '' }, t));
-    }
+    // Same song twice (by Spotify link, or by artist + title) counts once.
+    const haveUri = new Set(rows.map((r) => r.uri).filter(Boolean));
+    const unique = tracks.filter((t) => !haveUri.has(t.uri) && (haveUri.add(t.uri), true));
+    const byCandidate = new Map<Candidate, SpTrack>();
+    const cands = unique.map((t) => {
+      const c: Candidate = { title: cleanTitle(t.name), artist: t.artists[0]?.name ?? '' };
+      byCandidate.set(c, t);
+      return c;
+    });
+    const fresh = onlyNew(cands);
+    rows.push(...fresh.map((c) => newRow(c, byCandidate.get(c))));
+    const skipped = tracks.length - fresh.length;
+    linkMsg =
+      `Loaded ${tracks.length} song${tracks.length === 1 ? '' : 's'}` +
+      (lists.length ? ` from ${lists.length} playlist${lists.length === 1 ? '' : 's'}` : '') +
+      `: ${fresh.length} new` +
+      (skipped ? `, ${skipped} already in this playlist (or listed twice)` : '') +
+      '.';
     linkText = '';
-    touch();
-    run();
+    if (fresh.length) {
+      touch();
+      run();
+    }
   }
 
   /** A JPlay playlist export (songs with Spotify links) is imported as is;
@@ -517,7 +562,10 @@
       <div class="step">
         <p class="muted">Paste Spotify song links (one per line), or a link to a playlist you own. In Spotify: Share → Copy link.</p>
         <textarea rows="6" bind:value={linkText} placeholder="https://open.spotify.com/track/…"></textarea>
-        <button class="btn primary" disabled={!linkText.trim() || !player.connected} onclick={addFromLinks}>Check these songs</button>
+        <button class="btn primary" disabled={!linkText.trim() || !player.connected || !!linkBusy} onclick={addFromLinks}>{linkBusy ? 'Loading…' : 'Check these songs'}</button>
+        {#if !player.connected}<p class="muted hint">Connect Spotify first (on the Play page).</p>{/if}
+        {#if linkBusy}<p class="muted hint" aria-live="polite">{linkBusy}</p>{/if}
+        {#if linkMsg}<p class="notice ok" aria-live="polite">{linkMsg}</p>{/if}
       </div>
     {:else}
       <div class="step">
