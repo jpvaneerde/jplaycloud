@@ -46,7 +46,7 @@
 {:else if !playlists.all.length}
   <div class="empty card">
     <h2>No playlists yet</h2>
-    <p class="muted">Start from an AI song list, your Spotify playlists, or a JSON file. Every song is checked against Spotify and MusicBrainz.</p>
+    <p class="muted">Start from an AI song list, your Spotify playlists, or a JSON file. Every song is checked against Spotify, MusicBrainz and Wikidata.</p>
     <a class="btn primary" href="/admin/playlists/new" onclick={router.link}>Make the first playlist</a>
   </div>
 {:else}

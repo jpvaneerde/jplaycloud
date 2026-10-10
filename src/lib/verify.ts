@@ -1,6 +1,6 @@
 // Turns rough song candidates (from an AI list or Spotify links) into
 // verified songs: the right Spotify version, a clean title and artist,
-// and the year the recording was first released (from MusicBrainz).
+// and the year the recording was first released (MusicBrainz and Wikidata, checked against each other).
 
 import { searchTracks, type SpTrack } from './spotify/api';
 
@@ -19,6 +19,7 @@ export interface Checked {
   artist: string;
   year: number | null;
   mbYear: number | null;
+  wdYear: number | null;
   spotifyYear: number | null;
   confidence: Confidence;
   notes: string[];
@@ -179,6 +180,97 @@ async function mbBySearch(c: Candidate): Promise<number | null> {
   return years.length ? Math.min(...years) : null;
 }
 
+/* ---------- Wikidata (second opinion on the year) ---------- */
+
+const WD_API = 'https://www.wikidata.org/w/api.php';
+// Albums and films share titles with songs; their dates aren't the song's.
+const WD_NOT_A_SONG = new Set(['Q482994', 'Q208569', 'Q209939', 'Q222910', 'Q11424', 'Q5398426', 'Q7725634']);
+const WD_LANGS = 'en|mul|nl|de|fr|sv|es|it';
+
+let wdChain: Promise<unknown> = Promise.resolve();
+function wd<T>(params: Record<string, string>): Promise<T | null> {
+  const run = async () => {
+    await new Promise((r) => setTimeout(r, 250));
+    try {
+      const q = new URLSearchParams({ ...params, format: 'json', origin: '*' });
+      const res = await fetch(`${WD_API}?${q}`, { headers: { 'Api-User-Agent': 'JPlay (https://jplay.cloud)' } });
+      return res.ok ? ((await res.json()) as T) : null;
+    } catch {
+      return null;
+    }
+  };
+  const p = wdChain.then(run, run);
+  wdChain = p;
+  return p;
+}
+
+interface WdClaim {
+  mainsnak: { datavalue?: { value: { id?: string; time?: string } } };
+}
+interface WdEntity {
+  labels?: Record<string, { value: string }>;
+  aliases?: Record<string, { value: string }[]>;
+  claims?: Record<string, WdClaim[]>;
+}
+
+const wdIds = (e: WdEntity, prop: string) =>
+  (e.claims?.[prop] ?? []).map((c) => c.mainsnak.datavalue?.value.id).filter((x): x is string => !!x);
+const wdNames = (e: WdEntity) => [
+  ...Object.values(e.labels ?? {}).map((l) => l.value),
+  ...Object.values(e.aliases ?? {}).flatMap((a) => a.map((x) => x.value)),
+];
+
+function searchTerms(s: string) {
+  return s.replace(/[^\p{L}\p{N}' ]+/gu, ' ').replace(/\s+/g, ' ').trim();
+}
+
+async function wdSearch(q: string): Promise<string[]> {
+  const r = await wd<{ query?: { search: { title: string }[] } }>({
+    action: 'query',
+    list: 'search',
+    srsearch: `${q} haswbstatement:P175 haswbstatement:P577`,
+    srlimit: '15',
+    srnamespace: '0',
+  });
+  return (r?.query?.search ?? []).map((x) => x.title).filter((t) => /^Q\d+$/.test(t));
+}
+
+async function wdEntities(ids: string[], props: string): Promise<Record<string, WdEntity>> {
+  if (!ids.length) return {};
+  const r = await wd<{ entities?: Record<string, WdEntity> }>({
+    action: 'wbgetentities',
+    ids: ids.slice(0, 50).join('|'),
+    props,
+    languages: WD_LANGS,
+  });
+  return r?.entities ?? {};
+}
+
+/** Earliest publication date of the song by this artist, or null when Wikidata doesn't know it. */
+export async function wikidataYear(c: Candidate): Promise<number | null> {
+  const title = cleanTitle(c.title);
+  const artist = c.artist.split(/\s+(?:feat\.?|ft\.?|featuring|&|and|with|vs\.?)\s+|,/i)[0].trim();
+  let ids = await wdSearch(searchTerms(`${title} ${artist}`));
+  if (!ids.length) ids = await wdSearch(searchTerms(title));
+  if (!ids.length) return null;
+
+  const items = await wdEntities(ids, 'labels|aliases|claims');
+  const songs = Object.entries(items).filter(
+    ([, e]) =>
+      !wdIds(e, 'P31').some((t) => WD_NOT_A_SONG.has(t)) &&
+      wdNames(e).some((n) => similarity(cleanTitle(n), title) >= 0.85),
+  );
+  if (!songs.length) return null;
+
+  const performers = await wdEntities([...new Set(songs.flatMap(([, e]) => wdIds(e, 'P175')))], 'labels|aliases');
+  const years = songs
+    .filter(([, e]) => wdIds(e, 'P175').some((id) => performers[id] && wdNames(performers[id]).some((n) => similarity(n, artist) >= 0.7)))
+    .flatMap(([, e]) => (e.claims?.P577 ?? []).map((cl) => cl.mainsnak.datavalue?.value.time))
+    .map((t) => (t && /^\+\d{4}/.test(t) ? Number(t.slice(1, 5)) : null))
+    .filter((y): y is number => !!y && y >= 1900);
+  return years.length ? Math.min(...years) : null;
+}
+
 /* ---------- pipeline ---------- */
 
 export async function findOnSpotify(c: Candidate): Promise<Scored[]> {
@@ -206,6 +298,7 @@ export async function checkCandidate(c: Candidate): Promise<Checked> {
       artist: c.artist,
       year: c.year ?? null,
       mbYear: null,
+      wdYear: null,
       spotifyYear: best ? yearOf(best.track.album.release_date) : null,
       confidence: 'red',
       notes: [best ? 'no convincing match on Spotify' : 'not found on Spotify'],
@@ -231,41 +324,35 @@ export async function recheckWith(t: SpTrack, c: Candidate, alternatives: SpTrac
 async function finish(t: SpTrack, c: Candidate, alternatives: SpTrack[], reasons: string[]): Promise<Checked> {
   const notes = [...reasons];
   const spotifyYear = yearOf(t.album.release_date);
-  let mbYear: number | null = null;
-  let mbTitle: string | null = null;
-  const isrc = t.external_ids?.isrc;
-  if (isrc) {
-    const r = await mbByIsrc(isrc);
-    mbYear = r.year;
-    mbTitle = r.title;
-  }
-  // ISRCs of reissues sometimes only link to the reissue; a title search catches the original.
-  const searched = await mbBySearch({ title: cleanTitle(t.name), artist: t.artists[0]?.name ?? c.artist });
-  if (searched && (!mbYear || searched < mbYear)) mbYear = searched;
+  const plain = { title: cleanTitle(t.name), artist: t.artists[0]?.name ?? c.artist };
+
+  // MusicBrainz and Wikidata run side by side (each has its own queue).
+  const fromMb = async () => {
+    let year: number | null = null;
+    let mbTitle: string | null = null;
+    const isrc = t.external_ids?.isrc;
+    if (isrc) ({ year, title: mbTitle } = await mbByIsrc(isrc));
+    // ISRCs of reissues sometimes only link to the reissue; a title search catches the original.
+    const searched = await mbBySearch(plain);
+    if (searched && (!year || searched < year)) year = searched;
+    return { year, mbTitle };
+  };
+  const [{ year: mbYear, mbTitle }, wdYear] = await Promise.all([fromMb(), wikidataYear(plain).catch(() => null)]);
 
   let title = cleanTitle(t.name);
   if (mbTitle && similarity(mbTitle, title) >= 0.85 && mbTitle.length <= title.length + 25) {
     title = cleanTitle(mbTitle);
   }
 
-  let year: number | null = mbYear ?? null;
-  let confidence: Confidence = 'green';
-  if (mbYear == null) {
-    notes.push('no first-release date found in MusicBrainz');
-    const options = [c.year, spotifyYear].filter((y): y is number => !!y);
-    year = options.length ? Math.min(...options) : null;
-    confidence = c.year && spotifyYear && c.year === spotifyYear ? 'yellow' : 'red';
-  } else if (c.year && c.year !== mbYear) {
-    const d = Math.abs(c.year - mbYear);
-    notes.push(`AI said ${c.year}, MusicBrainz says ${mbYear}`);
-    confidence = d <= 1 ? 'yellow' : 'red';
-  }
-  if (spotifyYear && year && spotifyYear < year) {
-    notes.push(`Spotify album is from ${spotifyYear}, earlier than ${year}`);
-    confidence = 'red';
-  }
+  const { year, confidence: yearConfidence, notes: yearNotes } = decideYear({
+    mb: mbYear,
+    wd: wdYear,
+    list: c.year ?? null,
+    spotify: spotifyYear,
+  });
+  notes.push(...yearNotes);
+  let confidence = yearConfidence;
   if (reasons.length && confidence === 'green') confidence = 'yellow';
-  if (!year) confidence = 'red';
 
   return {
     match: t,
@@ -274,10 +361,64 @@ async function finish(t: SpTrack, c: Candidate, alternatives: SpTrack[], reasons
     artist: displayArtist(t),
     year,
     mbYear,
+    wdYear,
     spotifyYear,
     confidence,
     notes,
   };
+}
+
+const SOURCE_NAMES = { mb: 'MusicBrainz', wd: 'Wikidata', list: 'your list', spotify: 'Spotify album' } as const;
+type Source = keyof typeof SOURCE_NAMES;
+
+/** Pick the year. Two sources agreeing on the same year settles it (green).
+ *  Otherwise MusicBrainz/Wikidata lead, and disagreement or a lone guess needs a look. */
+export function decideYear(src: Record<Source, number | null>): { year: number | null; confidence: Confidence; notes: string[] } {
+  const given = (Object.keys(SOURCE_NAMES) as Source[]).filter((k) => src[k] != null);
+  const all = given.map((k) => `${SOURCE_NAMES[k]} ${src[k]}`).join(', ');
+  if (!given.length) return { year: null, confidence: 'red', notes: ['no release year found anywhere'] };
+
+  const votes = new Map<number, Source[]>();
+  for (const k of given) votes.set(src[k]!, [...(votes.get(src[k]!) ?? []), k]);
+  // Most votes wins; on a tie prefer a year backed by MusicBrainz/Wikidata, then the earliest.
+  const rank = (y: number) => {
+    const v = votes.get(y)!;
+    return v.length * 10 + (v.includes('mb') || v.includes('wd') ? 5 : 0);
+  };
+  const best = [...votes.keys()].sort((a, b) => rank(b) - rank(a) || a - b)[0];
+  const agree = votes.get(best)!;
+
+  if (agree.length >= 2) {
+    const others = given.filter((k) => !agree.includes(k));
+    // Your list matching a reissued Spotify album shouldn't outvote MusicBrainz/Wikidata,
+    // and a Spotify album older than the agreed year means something's off.
+    const trustedDisagrees = !agree.includes('mb') && !agree.includes('wd') && others.some((k) => k === 'mb' || k === 'wd');
+    const spotifyEarlier = src.spotify != null && src.spotify < best;
+    const label = `${agree.map((k) => SOURCE_NAMES[k]).join(' + ')} agree on ${best}`;
+    if (trustedDisagrees || spotifyEarlier) {
+      return { year: best, confidence: 'yellow', notes: [`${label}, but ${all}`] };
+    }
+    const disagree = others.filter((k) => k !== 'spotify');
+    return { year: best, confidence: 'green', notes: disagree.length ? [`${label} (${all})`] : [] };
+  }
+
+  // No two sources agree.
+  const lead = src.mb != null && src.wd != null ? Math.min(src.mb, src.wd) : (src.mb ?? src.wd);
+  if (lead == null) {
+    return {
+      year: Math.min(...given.map((k) => src[k]!)),
+      confidence: 'red',
+      notes: [`not found in MusicBrainz or Wikidata (${all})`],
+    };
+  }
+  const rest = given.filter((k) => src[k] !== lead && k !== 'spotify');
+  const spotifyEarlier = src.spotify != null && src.spotify < lead;
+  if (!rest.length && !spotifyEarlier) {
+    // A single trusted source with nothing contradicting it (a later Spotify album is just a reissue).
+    return { year: lead, confidence: 'green', notes: [] };
+  }
+  const far = rest.some((k) => Math.abs(src[k]! - lead) > 1) || spotifyEarlier;
+  return { year: lead, confidence: far ? 'red' : 'yellow', notes: [`sources disagree: ${all}`] };
 }
 
 /** Accepts the AI's list as JSON (array, or { songs: [...] }) or as CSV/TSV with a header row

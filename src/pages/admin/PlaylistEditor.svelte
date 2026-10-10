@@ -601,7 +601,7 @@
         </div>
       </div>
       {#if waitMsg}<p class="notice wait">{waitMsg}</p>{/if}
-      {#if running}<p class="muted note">MusicBrainz allows about one lookup per second, so this takes a couple of seconds per song.</p>{/if}
+      {#if running}<p class="muted note">Years are looked up in MusicBrainz and Wikidata. MusicBrainz allows about one lookup per second, so this takes a couple of seconds per song.</p>{/if}
 
       <div class="table-wrap card">
         <table>

@@ -70,11 +70,14 @@ own Spotify playlists, or a JSON file. Every player sees the published ones when
 
 1. **Spotify search** scores each result on title, artist and year. It penalises live, karaoke, cover, remix and
    re-recorded versions and compilations.
-2. **The year** is the earliest first-release date in MusicBrainz, looked up by the track's ISRC and by a title
-   search. MusicBrainz allows about one request per second.
+2. **The year** comes from four sources: MusicBrainz (earliest first-release date, by ISRC and title search),
+   Wikidata (earliest publication date of the song by that artist), your list's year and the Spotify album year.
+   When two of them agree on the same year, that year is used and the song is green. A list year that only matches
+   a reissued Spotify album can't outvote MusicBrainz or Wikidata. MusicBrainz allows about one request per second;
+   Wikidata is looked up at the same time.
 3. **Titles** are cleaned ("– Remastered 2011", "(feat. X)", "[Single Version]" are removed). Featured artists
    from Spotify are shown as "Main feat. Guest".
-4. **Each song gets a colour.** 🟢 means sources agree. 🟡 means a 1-year difference or a doubtful version.
+4. **Each song gets a colour.** 🟢 means two sources agree (or MusicBrainz/Wikidata found it and nothing contradicts it). 🟡 means a 1-year difference or a doubtful version.
    🔴 means no match or a big conflict, and red songs are left out when saving. Use **Listen**, pick another
    version, or type the right year (that marks the song checked).
 
