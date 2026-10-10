@@ -388,7 +388,7 @@
 
   <section class="card add">
     <div class="tabs" role="tablist">
-      <button role="tab" aria-selected={tab === 'ai'} class:on={tab === 'ai'} onclick={() => (tab = 'ai')}>From an AI list</button>
+      <button role="tab" aria-selected={tab === 'ai'} class:on={tab === 'ai'} onclick={() => (tab = 'ai')}>From a song list</button>
       <button role="tab" aria-selected={tab === 'spotify'} class:on={tab === 'spotify'} onclick={() => (tab = 'spotify')}>From Spotify</button>
       <button role="tab" aria-selected={tab === 'file'} class:on={tab === 'file'} onclick={() => (tab = 'file')}>From a JSON file</button>
     </div>
@@ -405,8 +405,9 @@
           <button class="btn small" onclick={copyPrompt}>{copied ? 'Copied' : 'Copy prompt'}</button>
         </div>
         <div class="step">
-          <h3>Paste what it returns</h3>
-          <textarea rows="10" bind:value={aiText} placeholder={'[{"artist": "…", "title": "…", "year": 1984}]'}></textarea>
+          <h3>Paste the song list</h3>
+          <p class="muted hint">What the AI returned, or your own list as CSV: one song per line with artist, title and year.</p>
+          <textarea rows="10" bind:value={aiText} placeholder={'artist,song title,year\nThe Beatles,Rain,1966\n\nor JSON: [{"artist": "…", "title": "…", "year": 1984}]'}></textarea>
           <button class="btn primary" disabled={!aiText.trim() || !player.connected} onclick={addFromAi}>Check these songs</button>
         </div>
       </div>
@@ -584,6 +585,10 @@
   }
   .step textarea {
     width: 100%;
+  }
+  .hint {
+    margin: -0.4rem 0 0;
+    font-size: 0.85rem;
   }
   .inline {
     display: flex;

@@ -279,26 +279,83 @@ async function finish(t: SpTrack, c: Candidate, alternatives: SpTrack[], reasons
   };
 }
 
-/** Accepts the AI's JSON (array, or { songs: [...] }), tolerating code fences and stray text. */
+/** Accepts the AI's list as JSON (array, or { songs: [...] }) or as CSV/TSV with a header row
+ *  (artist, title/song, year), tolerating code fences and stray text. */
 export function parseAiList(text: string): Candidate[] {
-  const cleaned = text.replace(/```(?:json)?/gi, '');
+  const cleaned = text.replace(/```(?:json|csv)?/gi, '').trim();
+  if (!cleaned) throw new Error('Paste the list first.');
+  // JSON starts with [ or {, or has an array of objects somewhere after some chatter; anything else is CSV.
+  const looksJson = /^[[{]/.test(cleaned) || /\[\s*\{/.test(cleaned);
+  return looksJson ? parseJsonList(cleaned) : parseCsvList(cleaned);
+}
+
+function toCandidate(artistRaw: unknown, titleRaw: unknown, yearRaw: unknown): Candidate | null {
+  const artist = String(artistRaw ?? '').trim();
+  const title = String(titleRaw ?? '').trim();
+  const y = parseInt(String(yearRaw ?? ''), 10);
+  return artist && title ? { artist, title, year: Number.isFinite(y) ? y : undefined } : null;
+}
+
+function parseJsonList(cleaned: string): Candidate[] {
   const start = cleaned.search(/[[{]/);
-  if (start < 0) throw new Error('No JSON found. Paste the list the AI returned.');
   let data: unknown;
   try {
     data = JSON.parse(cleaned.slice(start, cleaned.lastIndexOf(cleaned[start] === '[' ? ']' : '}') + 1));
   } catch {
-    throw new Error("That isn't valid JSON. Ask the AI to return only the JSON array.");
+    throw new Error("That isn't valid JSON or CSV. Ask the AI to return only the JSON array.");
   }
   const arr = Array.isArray(data) ? data : ((data as { songs?: unknown[] })?.songs ?? []);
-  const out: Candidate[] = [];
-  for (const raw of arr as Record<string, unknown>[]) {
-    const artist = String(raw.artist ?? raw.Artist ?? '').trim();
-    const title = String(raw.title ?? raw.song ?? raw.Title ?? '').trim();
-    const y = parseInt(String(raw.year ?? raw.Year ?? ''), 10);
-    if (artist && title) out.push({ artist, title, year: Number.isFinite(y) ? y : undefined });
-  }
+  const out = (arr as Record<string, unknown>[])
+    .map((r) => toCandidate(r.artist ?? r.Artist, r.title ?? r.song ?? r.Title ?? r['song title'], r.year ?? r.Year))
+    .filter((c): c is Candidate => !!c);
   if (!out.length) throw new Error('Found JSON, but no entries with "artist" and "title".');
+  return out;
+}
+
+/** Splits one CSV line, honouring "quoted, fields" and "" escapes. */
+function splitCsvLine(line: string, sep: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quoted) {
+      if (ch === '"' && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else if (ch === '"') quoted = false;
+      else cur += ch;
+    } else if (ch === '"' && cur.trim() === '') {
+      quoted = true;
+      cur = '';
+    } else if (ch === sep) {
+      out.push(cur);
+      cur = '';
+    } else cur += ch;
+  }
+  out.push(cur);
+  return out.map((f) => f.trim());
+}
+
+function parseCsvList(cleaned: string): Candidate[] {
+  const lines = cleaned.split(/\r?\n/).filter((l) => l.trim());
+  const first = lines[0] ?? '';
+  const sep = first.includes('\t') ? '\t' : (first.match(/;/g)?.length ?? 0) > (first.match(/,/g)?.length ?? 0) ? ';' : ',';
+  const header = splitCsvLine(first, sep).map((h) => h.toLowerCase());
+  let ai = header.findIndex((h) => h.includes('artist'));
+  let ti = header.findIndex((h) => h.includes('title') || h.includes('song') || h.includes('track'));
+  let yi = header.findIndex((h) => h.includes('year') || h === 'jaar' || h === 'år');
+  let body = lines.slice(1);
+  if (ai < 0 || ti < 0) {
+    // No header row: assume artist, title, year.
+    [ai, ti, yi] = [0, 1, 2];
+    body = lines;
+  }
+  const out = body
+    .map((l) => splitCsvLine(l, sep))
+    .map((f) => toCandidate(f[ai], f[ti], yi >= 0 ? f[yi] : undefined))
+    .filter((c): c is Candidate => !!c);
+  if (!out.length) throw new Error('No songs found. Use one song per line: artist, title, year.');
   return out;
 }
 
