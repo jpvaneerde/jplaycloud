@@ -89,6 +89,14 @@ own Spotify playlists, or a JSON file. Every player sees the published ones when
 - The small −/+ buttons on each player fix token counts by hand.
 - **Keyboard:** Space = play/pause, R = reveal, S = skip, N = next turn, Enter = reveal, then next.
 
+**Two ways to score** (Game options → Scoring):
+
+- **We keep the cards on the table:** JPlay plays the songs and tracks tokens; you lay out the cards yourselves.
+- **JPlay keeps the cards:** each player's timeline is on screen. The active player taps the spot where the song
+  goes. Stealers press Steal and tap a different spot. Reveal is possible once everyone has placed. JPlay checks
+  the answer (equal years count on either side), gives the card to the player or to the first stealer who got it
+  right, and announces the winner at the chosen number of cards (default 10, start card included).
+
 All of this can be changed under Game options.
 
 **Saved games:** a game in progress is saved after every move, both in the browser and on the JPlay server under

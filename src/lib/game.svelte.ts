@@ -1,5 +1,8 @@
 // Game state: players, tokens, the current turn and house-rule options.
-// Cards on the table are tracked by the players, not by the app.
+// Two ways to score:
+//  - 'table': players keep their cards on the table; JPlay only tracks tokens.
+//  - 'app':   JPlay keeps each player's timeline, players tap where the song goes,
+//             and JPlay checks the placement, handles steals and spots the winner.
 
 import { playlists, type Song } from './playlists.svelte';
 import { api } from './server';
@@ -17,6 +20,8 @@ export interface Options {
   randomStart: boolean; // start somewhere in the song instead of at 0:00
   randomStartMaxSec: number;
   songLimitSec: number; // 0 = play the whole song
+  scoring: 'table' | 'app';
+  cardsToWin: number; // 'app' scoring: timeline length that wins (start card included)
 }
 
 export const DEFAULT_OPTIONS: Options = {
@@ -32,13 +37,30 @@ export const DEFAULT_OPTIONS: Options = {
   randomStart: false,
   randomStartMaxSec: 45,
   songLimitSec: 0,
+  scoring: 'table',
+  cardsToWin: 10,
 };
+
+/** A card on a player's timeline. The start card only has a year. */
+export interface Card {
+  year: number;
+  title?: string;
+  artist?: string;
+  uri?: string;
+}
 
 export interface Player {
   id: string;
   name: string;
   startYear: number;
   tokens: number;
+  timeline: Card[]; // sorted by year ('app' scoring)
+}
+
+export interface TurnResult {
+  correct: boolean; // the active player placed it right
+  winnerId: string | null; // who gets the card: active player, a stealer, or nobody
+  rightSlots: number[]; // every slot that would have been correct
 }
 
 export interface Turn {
@@ -48,6 +70,10 @@ export interface Turn {
   revealed: boolean;
   stealers: string[]; // player ids who spent a token to steal
   earned: Record<string, number>; // tokens granted this turn for naming title + artist (for undo)
+  // 'app' scoring only:
+  placement?: number | null; // slot the active player picked on their timeline (0 = before the first card)
+  stealSlots?: Record<string, number>; // slot each stealer picked on the active player's timeline
+  result?: TurnResult | null;
 }
 
 export interface HistoryEntry {
@@ -66,6 +92,8 @@ interface Saved {
   history: HistoryEntry[];
   startedAt: number;
   savedAt: number;
+  winnerId?: string | null;
+  playOn?: boolean;
 }
 
 /** A game in progress is kept this long after it was last played. */
@@ -139,6 +167,11 @@ class Game {
 
   remaining = $derived(this.pool.filter((s) => !this.played.includes(s.uri)).length);
 
+  /** Set when someone reaches the winning number of cards ('app' scoring). */
+  winnerId = $state<string | null>(null);
+  /** The winner was announced and the players chose to keep going. */
+  playOn = $state(false);
+
   canSkip = $derived(
     !!this.active && !!this.turn && !this.turn.revealed && this.active.tokens >= this.options.skipCost,
   );
@@ -193,6 +226,8 @@ class Game {
     this.history = [];
     this.names = ['', ''];
     this.playlistIds = [];
+    this.winnerId = null;
+    this.playOn = false;
     this.sync = 'idle';
   }
 
@@ -205,6 +240,9 @@ class Game {
     this.turn = s.turn ?? null;
     this.played = s.played ?? [];
     this.history = s.history ?? [];
+    for (const p of this.players) p.timeline ??= [{ year: p.startYear }];
+    this.winnerId = s.winnerId ?? null;
+    this.playOn = s.playOn ?? false;
     this.startedAt = s.startedAt || s.savedAt || Date.now();
     this.savedAt = s.savedAt || Date.now();
   }
@@ -221,6 +259,8 @@ class Game {
       history: this.history,
       startedAt: this.startedAt,
       savedAt: Date.now(),
+      winnerId: this.winnerId,
+      playOn: this.playOn,
     }) as Saved;
   }
 
@@ -307,7 +347,10 @@ class Game {
       name,
       startYear: years[i],
       tokens: this.cap(o.startTokens),
+      timeline: [{ year: years[i] }],
     }));
+    this.winnerId = null;
+    this.playOn = false;
     this.played = [];
     this.history = [];
     this.startedAt = Date.now();
@@ -336,6 +379,9 @@ class Game {
       revealed: false,
       stealers: [],
       earned: {},
+      placement: null,
+      stealSlots: {},
+      result: null,
     };
   }
 
@@ -346,6 +392,7 @@ class Game {
     this.refundSteals();
     this.turn.song = this.drawSong();
     this.turn.startMs = this.startOffset();
+    this.turn.placement = null;
   }
 
   private refundSteals() {
@@ -355,6 +402,7 @@ class Game {
       if (p) p.tokens = this.cap(p.tokens + this.options.stealCost);
     }
     this.turn.stealers = [];
+    this.turn.stealSlots = {};
   }
 
   canSteal(id: string) {
@@ -368,6 +416,7 @@ class Game {
     const p = this.player(id)!;
     if (this.turn.stealers.includes(id)) {
       this.turn.stealers = this.turn.stealers.filter((x) => x !== id);
+      if (this.turn.stealSlots) delete this.turn.stealSlots[id];
       p.tokens = this.cap(p.tokens + this.options.stealCost);
     } else {
       this.turn.stealers.push(id);
@@ -375,8 +424,85 @@ class Game {
     }
   }
 
+  /* ---------- 'app' scoring: placing cards ---------- */
+
+  get scoringApp() {
+    return this.options.scoring === 'app';
+  }
+
+  /** Slots on the active player's timeline already taken (by the player or another stealer). */
+  slotTaken(slot: number, exceptId: string) {
+    if (!this.turn) return false;
+    if (exceptId !== this.turn.playerId && this.turn.placement === slot) return true;
+    return Object.entries(this.turn.stealSlots ?? {}).some(([id, s]) => id !== exceptId && s === slot);
+  }
+
+  /** Put a player's guess on a slot of the active player's timeline. */
+  place(playerId: string, slot: number) {
+    const t = this.turn;
+    if (!t || t.revealed || this.slotTaken(slot, playerId)) return;
+    if (playerId === t.playerId) {
+      t.placement = slot;
+    } else if (t.stealers.includes(playerId)) {
+      t.stealSlots = { ...(t.stealSlots ?? {}), [playerId]: slot };
+    }
+  }
+
+  /** Every slot where a card of this year would be correct (equal years fit on either side). */
+  static rightSlots(timeline: Card[], year: number): number[] {
+    const out: number[] = [];
+    for (let i = 0; i <= timeline.length; i++) {
+      const before = i === 0 || timeline[i - 1].year <= year;
+      const after = i === timeline.length || year <= timeline[i].year;
+      if (before && after) out.push(i);
+    }
+    return out;
+  }
+
+  canReveal = $derived(
+    !!this.turn?.song &&
+      !this.turn.revealed &&
+      (this.options.scoring !== 'app' ||
+        (this.turn.placement != null &&
+          this.turn.stealers.every((id) => this.turn!.stealSlots?.[id] != null))),
+  );
+
   reveal() {
-    if (this.turn && this.turn.song) this.turn.revealed = true;
+    const t = this.turn;
+    if (!t || !t.song || t.revealed) return;
+    if (this.scoringApp) {
+      if (!this.canReveal) return;
+      const active = this.active!;
+      const right = Game.rightSlots(active.timeline, t.song.year);
+      const correct = right.includes(t.placement!);
+      let winnerId: string | null = correct ? active.id : null;
+      if (!correct) {
+        // Hitster: the first stealer (in turn order after the active player) who got it right takes the card.
+        const order = this.turnOrderFrom(active.id).filter((id) => t.stealers.includes(id));
+        winnerId = order.find((id) => right.includes(t.stealSlots?.[id] ?? -1)) ?? null;
+      }
+      if (winnerId) {
+        const w = this.player(winnerId)!;
+        const card: Card = { year: t.song.year, title: t.song.title, artist: t.song.artist, uri: t.song.uri };
+        const at = Game.rightSlots(w.timeline, card.year)[0] ?? w.timeline.length;
+        w.timeline.splice(at, 0, card);
+        if (!this.winnerId && !this.playOn && w.timeline.length >= this.options.cardsToWin) this.winnerId = w.id;
+      }
+      t.result = { correct, winnerId, rightSlots: right };
+    }
+    t.revealed = true;
+  }
+
+  /** Player ids starting after `id`, in turn order. */
+  private turnOrderFrom(id: string): string[] {
+    const i = this.players.findIndex((p) => p.id === id);
+    return [...this.players.slice(i + 1), ...this.players.slice(0, i)].map((p) => p.id);
+  }
+
+  /** After a win: carry on playing (no new winner announced). */
+  keepPlaying() {
+    this.playOn = true;
+    this.winnerId = null;
   }
 
   canEarn(id: string) {
@@ -420,7 +546,13 @@ class Game {
     for (let tries = 0; this.options.uniqueStartYears && used.includes(y) && tries < 200; tries++) {
       y = rand(this.options.yearMin, this.options.yearMax);
     }
-    this.players.push({ id: crypto.randomUUID(), name, startYear: y, tokens: this.cap(this.options.startTokens) });
+    this.players.push({
+      id: crypto.randomUUID(),
+      name,
+      startYear: y,
+      tokens: this.cap(this.options.startTokens),
+      timeline: [{ year: y }],
+    });
   }
 
   removePlayer(id: string) {
@@ -440,6 +572,8 @@ class Game {
     this.players = [];
     this.played = [];
     this.history = [];
+    this.winnerId = null;
+    this.playOn = false;
     this.restored = false;
     this.sync = 'idle';
     api.del('/game').catch(() => {});

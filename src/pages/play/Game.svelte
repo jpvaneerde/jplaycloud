@@ -6,6 +6,7 @@
   import { wakeLock } from '../../lib/wakelock.svelte';
   import Logo from '../../lib/ui/Logo.svelte';
   import Record from '../../lib/ui/Record.svelte';
+  import Timeline, { type Marker } from '../../lib/ui/Timeline.svelte';
   import Options from './Options.svelte';
 
   let optionsOpen = $state(false);
@@ -21,6 +22,61 @@
   const active = $derived(game.active);
   const o = $derived(game.options);
   const revealed = $derived(!!turn?.revealed);
+  const appScoring = $derived(o.scoring === 'app');
+
+  // 'app' scoring: whose guess the next tap on the timeline sets (the active player unless a stealer is picking).
+  let placing = $state<string | null>(null);
+  const placerId = $derived(
+    placing && turn?.stealers.includes(placing) ? placing : (turn?.playerId ?? null),
+  );
+  const placer = $derived(game.players.find((p) => p.id === placerId) ?? null);
+  const markers = $derived.by<Marker[]>(() => {
+    if (!turn) return [];
+    const list: Marker[] = [];
+    if (turn.placement != null) list.push({ slot: turn.placement, name: active?.name ?? '', kind: 'active' });
+    for (const [id, slot] of Object.entries(turn.stealSlots ?? {})) {
+      const name = game.players.find((p) => p.id === id)?.name;
+      if (name) list.push({ slot, name, kind: 'steal' });
+    }
+    return list;
+  });
+  const waitingFor = $derived.by(() => {
+    if (!appScoring || !turn || turn.revealed) return '';
+    if (turn.placement == null) return `${active?.name}: tap where the song goes`;
+    const missing = turn.stealers
+      .filter((id) => turn.stealSlots?.[id] == null)
+      .map((id) => game.players.find((p) => p.id === id)?.name);
+    return missing.length ? `${missing.join(', ')}: pick a spot to steal` : '';
+  });
+  const resultText = $derived.by(() => {
+    const r = turn?.result;
+    if (!r || !active) return '';
+    const winner = game.players.find((p) => p.id === r.winnerId);
+    if (r.correct) return `Right! ${active.name} keeps the card.`;
+    if (winner) return `Wrong spot. ${winner.name} steals the card!`;
+    return 'Wrong spot. Nobody gets this card.';
+  });
+  const winner = $derived(game.players.find((p) => p.id === game.winnerId) ?? null);
+
+  function pick(slot: number) {
+    if (!placerId) return;
+    game.place(placerId, slot);
+    if (placerId !== turn?.playerId) placing = null;
+  }
+
+  function steal(id: string) {
+    const was = turn?.stealers.includes(id);
+    game.toggleSteal(id);
+    placing = !was && appScoring && turn?.stealers.includes(id) ? id : null;
+  }
+
+  // New turn: the active player places first.
+  $effect(() => {
+    void turn?.playerId;
+    void song?.uri;
+    placing = null;
+  });
+
   const playKey = $derived(turn && song ? `${turn.playerId}|${song.uri}|${game.played.length}` : '');
 
   onMount(() => {
@@ -67,12 +123,12 @@
     if (k === ' ') {
       e.preventDefault();
       player.togglePause();
-    } else if (k === 'r' && !revealed) game.reveal();
+    } else if (k === 'r' && !revealed && game.canReveal) game.reveal();
     else if (k === 'n' && revealed) game.next();
     else if (k === 's' && game.canSkip) game.skip();
     else if (k === 'enter' && t.tagName !== 'BUTTON') {
       if (revealed) game.next();
-      else game.reveal();
+      else if (game.canReveal) game.reveal();
     }
   }
 
@@ -139,6 +195,12 @@
           <span class="name">{p.name}</span>
           <span class="start tabular" title="Start year">{p.startYear}</span>
         </div>
+        {#if appScoring}
+          <div class="cards-count" aria-label="{p.timeline.length} of {o.cardsToWin} cards">
+            <span class="bar-mini"><span style="width: {Math.min(100, (p.timeline.length / o.cardsToWin) * 100)}%"></span></span>
+            <span class="tabular">{p.timeline.length}/{o.cardsToWin}</span>
+          </div>
+        {/if}
         <div class="tokens" aria-label="{p.tokens} tokens">
           {#each coins(p.tokens) as full, i (i)}<span class="coin" class:empty={!full}></span>{/each}
           {#if p.tokens === 0 && o.maxTokens === 0}<span class="muted none">no tokens</span>{/if}
@@ -151,8 +213,13 @@
               class="btn small steal"
               class:on={stealing}
               disabled={!game.canSteal(p.id)}
-              onclick={() => game.toggleSteal(p.id)}
+              onclick={() => steal(p.id)}
               aria-pressed={stealing}>{stealing ? 'Stealing' : 'Steal'}</button>
+            {#if stealing && appScoring}
+              <button class="btn ghost small" class:picking={placerId === p.id} onclick={() => (placing = p.id)}>
+                {turn?.stealSlots?.[p.id] != null ? 'Move' : 'Pick spot'}
+              </button>
+            {/if}
           {:else if stealing}
             <span class="tag steal-tag">Stole</span>
             {#if game.canEarn(p.id)}
@@ -177,7 +244,11 @@
   {:else}
     <main class="stage">
       <div class="deck">
-        <Record spinning={playing} {revealed} year={song.year} size="min(400px, 34vw, calc(100vh - 390px))" />
+        <Record
+          spinning={playing}
+          {revealed}
+          year={song.year}
+          size={appScoring ? 'min(300px, 26vw, max(170px, calc(100vh - 600px)))' : 'min(400px, 34vw, calc(100vh - 390px))'} />
       </div>
 
       <div class="info">
@@ -186,11 +257,19 @@
           <h1 class="title">{song.title}</h1>
           <p class="artist">{song.artist}</p>
           <p class="year-line">Released in <strong class="tabular">{song.year}</strong></p>
-          {#if stealerNames.length}<p class="stealers">Steal attempt by {stealerNames.join(', ')}</p>{/if}
+          {#if appScoring}
+            <p class="result" class:good={turn?.result?.correct} class:bad={!turn?.result?.correct}>{resultText}</p>
+          {:else if stealerNames.length}
+            <p class="stealers">Steal attempt by {stealerNames.join(', ')}</p>
+          {/if}
         {:else}
           <p class="kicker">Now playing for</p>
           <h1 class="title">{active?.name}</h1>
-          <p class="artist muted">Place your card on your timeline. Others can steal before the reveal.</p>
+          <p class="artist muted">
+            {appScoring
+              ? 'Tap where the song fits on the timeline below. Others can steal before the reveal.'
+              : 'Place your card on your timeline. Others can steal before the reveal.'}
+          </p>
         {/if}
 
         <div class="transport">
@@ -208,12 +287,34 @@
       </div>
     </main>
 
+    {#if appScoring && active}
+      <section class="tl card" aria-label="{active.name}'s timeline">
+        <div class="tl-head">
+          <h2>{active.name}'s timeline</h2>
+          {#if !revealed && placer}
+            <p class="placing" class:steal={placer.id !== active.id}>
+              {placer.id === active.id ? `${placer.name}, tap a spot` : `${placer.name} is stealing: tap a different spot`}
+            </p>
+          {/if}
+        </div>
+        <Timeline
+          cards={active.timeline}
+          markers={revealed && turn?.result?.winnerId === active.id ? [] : markers}
+          pickable={!revealed}
+          onpick={pick}
+          highlightUri={revealed && turn?.result?.winnerId === active.id ? song.uri : null}
+          rightSlots={revealed && turn?.result?.winnerId !== active.id ? (turn?.result?.rightSlots ?? []) : []}
+          judged={revealed && turn?.result?.winnerId !== active.id}
+          label="{active.name}'s timeline" />
+      </section>
+    {/if}
+
     <footer class="actions">
       {#if !revealed}
         <button class="btn big skip" disabled={!game.canSkip} onclick={() => game.skip()} title={skipReason}>
           Skip song <span class="cost">−{o.skipCost} <span class="coin"></span></span> <kbd>S</kbd>
         </button>
-        <button class="btn primary big" onclick={() => game.reveal()}>Reveal <kbd>R</kbd></button>
+        <button class="btn primary big" disabled={!game.canReveal} onclick={() => game.reveal()} title={waitingFor}>Reveal <kbd>R</kbd></button>
       {:else}
         <button
           class="btn big"
@@ -225,7 +326,7 @@
         <button class="btn primary big" onclick={() => game.next()}>Next: {nextName} <kbd>N</kbd></button>
       {/if}
     </footer>
-    {#if skipReason}<p class="skip-reason muted">{skipReason}</p>{/if}
+    {#if waitingFor}<p class="skip-reason muted">{waitingFor}</p>{:else if skipReason}<p class="skip-reason muted">{skipReason}</p>{/if}
   {/if}
 
   {#if historyOpen}
@@ -241,6 +342,24 @@
         {/each}
       </ol>
     </aside>
+  {/if}
+
+  {#if winner && armed}
+    <div class="arm">
+      <div class="resume card win" role="dialog" aria-labelledby="win-title">
+        <p class="kicker">We have a winner</p>
+        <h2 id="win-title">{winner.name} wins with {winner.timeline.length} cards!</h2>
+        <ol class="win-list">
+          {#each winner.timeline as c, i (i)}
+            <li><b class="tabular">{c.year}</b> {c.title ?? 'Start year'}{#if c.artist}<span class="muted"> · {c.artist}</span>{/if}</li>
+          {/each}
+        </ol>
+        <div class="resume-acts">
+          <button class="btn primary big" onclick={() => game.keepPlaying()}>Keep playing</button>
+          <button class="btn ghost" onclick={endGame}>End game</button>
+        </div>
+      </div>
+    </div>
   {/if}
 
   {#if !armed}
@@ -520,6 +639,79 @@
     .transport {
       width: 100%;
     }
+  }
+
+  /* Cards ('app' scoring) */
+  .cards-count {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--muted);
+  }
+  .bar-mini {
+    flex: 1;
+    height: 5px;
+    border-radius: 3px;
+    background: var(--card-hover);
+    overflow: hidden;
+  }
+  .bar-mini span {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+  }
+  .picking {
+    color: var(--blue) !important;
+    background: var(--card-hover) !important;
+  }
+  .tl {
+    padding: 0.75rem 1rem 0.5rem;
+    box-shadow: none;
+    margin-bottom: 0.5rem;
+  }
+  .tl-head {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+  .tl-head h2 {
+    font-size: 1rem;
+  }
+  .placing {
+    margin: 0;
+    font-weight: 700;
+    color: var(--accent-2);
+    font-size: 0.9rem;
+  }
+  .placing.steal {
+    color: var(--blue);
+  }
+  .result {
+    margin: 0.25rem 0 0;
+    font-weight: 800;
+    font-size: 1.15rem;
+  }
+  .result.good {
+    color: #22c55e;
+  }
+  .result.bad {
+    color: var(--danger);
+  }
+  .win h2 {
+    font-size: 1.8rem;
+  }
+  .win-list {
+    margin: 0.5rem 0 0;
+    padding-left: 1.2rem;
+    max-height: 40vh;
+    overflow: auto;
+    font-size: 0.9rem;
+  }
+  .win-list b {
+    color: var(--accent-2);
   }
 
   /* Actions */

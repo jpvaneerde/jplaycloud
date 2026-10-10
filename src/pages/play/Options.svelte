@@ -23,6 +23,15 @@
   </header>
 
   <section>
+    <h3>Scoring</h3>
+    <label class="check"><input type="radio" name="scoring" value="table" bind:group={o.scoring} disabled={inGame} /> <span><b>We keep the cards on the table.</b> JPlay plays the songs and tracks tokens.</span></label>
+    <label class="check"><input type="radio" name="scoring" value="app" bind:group={o.scoring} disabled={inGame} /> <span><b>JPlay keeps the cards.</b> Each player's timeline is on screen: tap where the song goes, and JPlay checks it, handles steals and spots the winner.</span></label>
+    {#if o.scoring === 'app'}
+      <label class="field indent"><span>Cards needed to win (start card included)</span><input type="number" min="3" max="50" bind:value={o.cardsToWin} /></label>
+    {/if}
+  </section>
+
+  <section>
     <h3>Tokens</h3>
     <div class="grid">
       <label class="field"><span>Starting tokens</span><input type="number" min="0" max="20" bind:value={o.startTokens} disabled={inGame} /></label>

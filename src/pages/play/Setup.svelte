@@ -132,6 +132,10 @@
       <p class="muted note">
         Everyone gets a random start year between {game.options.yearMin} and {game.options.yearMax}, and
         {game.options.startTokens} token{game.options.startTokens === 1 ? '' : 's'}.
+        {game.options.scoring === 'app'
+          ? `JPlay keeps the cards: first to ${game.options.cardsToWin} wins.`
+          : 'You keep the cards on the table.'}
+        <button class="linkish" onclick={() => (optionsOpen = true)}>Change</button>
       </p>
     </section>
 
@@ -351,6 +355,12 @@
   }
   .bad {
     color: var(--danger);
+  }
+  .linkish {
+    color: var(--accent-2);
+    text-decoration: underline;
+    padding: 0;
+    font-size: inherit;
   }
   .small-link {
     display: inline-block;
