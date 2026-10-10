@@ -42,6 +42,7 @@ export interface Me {
   invitesLeft: number | null;
   theme: 'dark' | 'light' | 'retro';
   hasPassword: boolean;
+  spotifyClientId: string | null;
   createdAt: number;
 }
 

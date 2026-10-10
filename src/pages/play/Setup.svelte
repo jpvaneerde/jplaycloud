@@ -99,6 +99,9 @@
         <p class="muted">Songs will play from this tab. Nothing about the song is shown until you reveal it.</p>
       {/if}
       {#if spotifyError}<p class="bad">{spotifyError}</p>{/if}
+      {#if spotifyError || player.status === 'error' || !player.connected}
+        <a class="small-link" href="/settings#spotify" onclick={router.link}>Spotify settings: use your own Spotify app</a>
+      {/if}
     </div>
     {#if !player.connected}
       <button class="btn primary" onclick={connectSpotify}>Connect Spotify</button>
@@ -348,5 +351,10 @@
   }
   .bad {
     color: var(--danger);
+  }
+  .small-link {
+    display: inline-block;
+    margin-top: 0.35rem;
+    font-size: 0.875rem;
   }
 </style>

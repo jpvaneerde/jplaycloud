@@ -83,7 +83,11 @@ class HiddenPlayer {
       this.fail(`This browser can't play Spotify here (${message}). Use Chrome, Edge or Firefox on a laptop.`),
     );
     p.addListener('authentication_error', () => this.fail('The Spotify connection expired. Connect Spotify again.'));
-    p.addListener('account_error', () => this.fail('Playback needs a Spotify Premium account.'));
+    p.addListener('account_error', () =>
+      this.fail(
+        "Spotify won't play here. It needs a Premium account, and that account must be on the Spotify app's user list (see Settings → Spotify).",
+      ),
+    );
     p.addListener('playback_error', ({ message }: { message: string }) => (this.error = `Playback failed: ${message}`));
     p.addListener('player_state_changed', (s: any) => this.onState(s));
     this.hideMediaSession();
@@ -121,6 +125,11 @@ class HiddenPlayer {
         await playOn(this.deviceId!, uri, opts.startMs ?? 0);
       } else {
         this.playState = 'idle';
+        if (e instanceof SpotifyError && e.status === 403) {
+          throw new Error(
+            "Spotify refused to play. Your account needs Premium and must be on the Spotify app's user list (see Settings → Spotify).",
+          );
+        }
         throw e;
       }
     }

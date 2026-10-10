@@ -20,7 +20,9 @@ accounts, invites, sign-in and the shared playlists. Data lives in one SQLite fi
 - **The first admin:** register with the address in `ADMIN_EMAIL`. That's allowed without an invite as long as there
   is no admin yet.
 - **Spotify** is connected separately in the browser on the laptop that plays the music, using PKCE (no client
-  secret). Only that laptop's Spotify account has to be on the Spotify app's user list.
+  secret). The shared Spotify app is in Development Mode, so only 5 listed Spotify accounts can use it. Anyone
+  else can enter the client ID of their own free Spotify app under Settings → Spotify. The page has step-by-step
+  instructions, and the ID is saved with their JPlay account.
 
 ## Run it locally
 

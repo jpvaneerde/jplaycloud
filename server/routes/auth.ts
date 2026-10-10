@@ -107,7 +107,7 @@ me.get('/', (c) => {
 
 me.patch('/', async (c) => {
   const u = c.get('user');
-  const b = await c.req.json<{ name?: string; theme?: string }>();
+  const b = await c.req.json<{ name?: string; theme?: string; spotifyClientId?: string | null }>();
   if (b.name !== undefined) {
     const name = String(b.name).trim().slice(0, 40);
     if (!name) throw bad('Enter your name.');
@@ -116,6 +116,13 @@ me.patch('/', async (c) => {
   if (b.theme !== undefined) {
     if (!['dark', 'light', 'retro'].includes(b.theme)) throw bad('Unknown theme.');
     run('UPDATE users SET theme = ? WHERE id = ?', b.theme, u.id);
+  }
+  if (b.spotifyClientId !== undefined) {
+    const id = b.spotifyClientId ? String(b.spotifyClientId).trim().toLowerCase() : null;
+    if (id && !/^[0-9a-f]{32}$/.test(id)) {
+      throw bad("That doesn't look like a Spotify Client ID: it's 32 letters and digits, shown on your app's Settings page.");
+    }
+    run('UPDATE users SET spotify_client_id = ? WHERE id = ?', id, u.id);
   }
   return c.json({ user: publicUser(get<User>('SELECT * FROM users WHERE id = ?', u.id)!) });
 });

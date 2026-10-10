@@ -15,6 +15,7 @@ export interface User {
   disabled: number;
   theme: string;
   invited_by: string | null;
+  spotify_client_id: string | null;
   created_at: number;
   last_login_at: number | null;
 }
@@ -128,6 +129,8 @@ export function publicUser(u: User) {
     invitesLeft: u.role === 'admin' ? null : u.invites_left,
     theme: u.theme,
     hasPassword: !!u.password_hash,
+    /** Their own Spotify app, if they set one; otherwise the shared JPlay app is used. */
+    spotifyClientId: u.spotify_client_id,
     createdAt: u.created_at,
   };
 }

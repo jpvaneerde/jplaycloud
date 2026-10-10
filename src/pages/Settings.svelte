@@ -5,8 +5,9 @@
   import { session } from '../lib/session.svelte';
   import { router } from '../lib/router.svelte';
   import { api, type InviteView, type Me } from '../lib/server';
-  import { player } from '../lib/spotify/player.svelte';
-  import { connectSpotify } from '../lib/spotify/auth';
+  import SpotifySettings from '../lib/ui/SpotifySettings.svelte';
+
+  let { spotifyError = null }: { spotifyError?: string | null } = $props();
 
   const user = $derived(session.user!);
 
@@ -191,14 +192,9 @@
     </section>
 
     <section class="card box wide">
-      <h2>Spotify on this device</h2>
-      {#if player.connected}
-        <p class="muted small">This browser is connected to Spotify and can play the music for a game.</p>
-        <button class="btn" onclick={() => player.disconnect()}>Disconnect Spotify</button>
-      {:else}
-        <p class="muted small">Connect on the laptop that plays the music. Needs Spotify Premium.</p>
-        <button class="btn primary" onclick={connectSpotify}>Connect Spotify</button>
-      {/if}
+      <h2 id="spotify">Spotify</h2>
+      {#if spotifyError}<p class="notice error">{spotifyError}</p>{/if}
+      <SpotifySettings />
     </section>
   </div>
 </Shell>

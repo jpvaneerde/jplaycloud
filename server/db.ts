@@ -84,6 +84,12 @@ db.exec(`
   );
 `);
 
+// Small additive migrations for databases created by earlier versions.
+const userCols = (db.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((c) => c.name);
+if (!userCols.includes('spotify_client_id')) {
+  db.exec('ALTER TABLE users ADD COLUMN spotify_client_id TEXT');
+}
+
 export function now() {
   return Date.now();
 }

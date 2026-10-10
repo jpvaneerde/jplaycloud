@@ -77,7 +77,7 @@
 {:else if !session.user}
   <div class="boot"></div>
 {:else if router.path === '/settings'}
-  <Settings />
+  <Settings {spotifyError} />
 {:else if router.path.startsWith('/admin')}
   <Admin />
 {:else if !game.ready}

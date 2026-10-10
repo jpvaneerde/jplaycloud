@@ -1,4 +1,5 @@
 import { api, ApiError, type Me, type Provider } from './server';
+import { setPreferredClientId } from './spotify/auth';
 
 class Session {
   user = $state<Me | null>(null);
@@ -14,6 +15,7 @@ class Session {
       this.user = r.user;
       this.identities = r.identities;
       this.providers = r.providers;
+      setPreferredClientId(r.user.spotifyClientId);
       applyTheme(r.user.theme);
     } catch (e) {
       if (!(e instanceof ApiError) || e.status !== 401) console.error(e);
@@ -28,8 +30,16 @@ class Session {
     await api.patch('/me', { theme });
   }
 
+  /** Use your own Spotify app (client ID) instead of the shared one; null = shared. */
+  async setSpotifyClientId(id: string | null) {
+    const r = await api.patch<{ user: Me }>('/me', { spotifyClientId: id });
+    this.user = r.user;
+    setPreferredClientId(r.user.spotifyClientId);
+  }
+
   async logout() {
     await api.post('/auth/logout').catch(() => {});
+    setPreferredClientId(null);
     this.user = null;
   }
 }
