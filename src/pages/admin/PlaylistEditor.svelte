@@ -197,30 +197,56 @@
     run();
   }
 
+  /** A JPlay playlist export (songs with Spotify links) is imported as is;
+   *  any other song list (JSON or CSV without links) is checked like a pasted list. */
   async function addFromFile(e: Event) {
     error = null;
-    const file = (e.currentTarget as HTMLInputElement).files?.[0];
+    saved = null;
+    const input = e.currentTarget as HTMLInputElement; // capture before awaiting
+    const file = input.files?.[0];
     if (!file) return;
     try {
-      const data = JSON.parse(await file.text());
-      const songs: Song[] = Array.isArray(data) ? data : data.songs;
-      if (!Array.isArray(songs)) throw new Error('No "songs" list in that file.');
-      if (!name && data.name) name = data.name;
-      if (!description && data.description) description = data.description;
-      const have = new Set(rows.map((r) => r.uri));
-      let added = 0;
-      for (const s of songs) {
-        if (!s?.uri || have.has(s.uri)) continue;
-        have.add(s.uri);
-        rows.push(rowFromSong({ uri: s.uri, title: s.title ?? '', artist: s.artist ?? '', year: Number(s.year) }));
-        added++;
+      const text = await file.text();
+      let data: { name?: string; description?: string; songs?: Partial<Song>[] } | Partial<Song>[] | null = null;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = null; // not JSON: probably CSV
       }
-      saved = `Added ${added} songs from ${file.name}. They keep their years; use Re-check to verify them.`;
-      touch();
+      const list = data ? (Array.isArray(data) ? data : data.songs) : null;
+      const linked = Array.isArray(list) && list.length > 0 && list.filter((x) => x?.uri).length >= list.length / 2;
+
+      if (linked) {
+        if (!Array.isArray(data)) {
+          if (!name && data!.name) name = data!.name;
+          if (!description && data!.description) description = data!.description;
+        }
+        const have = new Set(rows.map((r) => r.uri));
+        let added = 0;
+        for (const x of list!) {
+          if (!x?.uri || have.has(x.uri)) continue;
+          have.add(x.uri);
+          rows.push(rowFromSong({ uri: x.uri, title: x.title ?? '', artist: x.artist ?? '', year: Number(x.year) }));
+          added++;
+        }
+        saved = `Added ${added} songs from ${file.name}. They keep their years; use Re-check to verify them.`;
+        touch();
+      } else {
+        const candidates = parseAiList(text);
+        const existing = new Set(rows.map((r) => `${r.input.artist}|${r.input.title}`.toLowerCase()));
+        const fresh = candidates.filter((c) => !existing.has(`${c.artist}|${c.title}`.toLowerCase()));
+        rows.push(...fresh.map((c) => newRow(c)));
+        touch();
+        saved = player.connected
+          ? `Added ${fresh.length} songs from ${file.name}. Checking them on Spotify and MusicBrainz now.`
+          : `Added ${fresh.length} songs from ${file.name}. Connect Spotify to check them.`;
+        if (player.connected) run();
+      }
     } catch (err) {
       error = `Couldn't read that file: ${(err as Error).message}`;
+    } finally {
+      input.value = '';
     }
-    (e.currentTarget as HTMLInputElement).value = '';
   }
 
   async function run() {
@@ -390,7 +416,7 @@
     <div class="tabs" role="tablist">
       <button role="tab" aria-selected={tab === 'ai'} class:on={tab === 'ai'} onclick={() => (tab = 'ai')}>From a song list</button>
       <button role="tab" aria-selected={tab === 'spotify'} class:on={tab === 'spotify'} onclick={() => (tab = 'spotify')}>From Spotify</button>
-      <button role="tab" aria-selected={tab === 'file'} class:on={tab === 'file'} onclick={() => (tab = 'file')}>From a JSON file</button>
+      <button role="tab" aria-selected={tab === 'file'} class:on={tab === 'file'} onclick={() => (tab = 'file')}>From a file</button>
     </div>
 
     {#if tab === 'ai'}
@@ -419,8 +445,11 @@
       </div>
     {:else}
       <div class="step">
-        <p class="muted">Import a playlist file downloaded from JPlay (or any file with a "songs" list of uri, title, artist and year).</p>
-        <input type="file" accept="application/json,.json" onchange={addFromFile} />
+        <p class="muted">
+          A song list as a CSV or JSON file (artist, title, year): the songs are checked like a pasted list. A playlist
+          downloaded from JPlay is imported as it is.
+        </p>
+        <input type="file" accept="application/json,.json,text/csv,.csv,text/plain,.txt" onchange={addFromFile} />
       </div>
     {/if}
     {#if error}<p class="notice error">{error}</p>{/if}
