@@ -16,7 +16,7 @@ const SCOPES = [
   'playlist-read-collaborative',
 ].join(' ');
 
-const TOKEN_KEY = 'jplay.token';
+const TOKEN_KEY = 'jplay.spotify';
 const VERIFIER_KEY = 'jplay.pkce';
 
 interface Token {
@@ -58,11 +58,11 @@ function saveToken(t: { access_token: string; refresh_token?: string; expires_in
 
 let memToken: Token | null = readToken();
 
-export function isLoggedIn(): boolean {
+export function spotifyConnected(): boolean {
   return !!memToken?.refresh_token;
 }
 
-export function logout() {
+export function disconnectSpotify() {
   memToken = null;
   try {
     localStorage.removeItem(TOKEN_KEY);
@@ -71,10 +71,11 @@ export function logout() {
   }
 }
 
-export async function login() {
+export async function connectSpotify() {
   const verifier = b64url(crypto.getRandomValues(new Uint8Array(64)));
   const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
   sessionStorage.setItem(VERIFIER_KEY, verifier);
+  sessionStorage.setItem('jplay.spotifyReturn', location.pathname + location.search);
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
     response_type: 'code',
@@ -91,7 +92,9 @@ export async function handleCallback(): Promise<string | null> {
   const params = new URLSearchParams(location.search);
   const error = params.get('error');
   const code = params.get('code');
-  history.replaceState(null, '', '/');
+  const back = sessionStorage.getItem('jplay.spotifyReturn') || '/';
+  sessionStorage.removeItem('jplay.spotifyReturn');
+  history.replaceState(null, '', back.startsWith('/') && !back.startsWith('//') ? back : '/');
   if (error) return `Spotify said: ${error}`;
   const verifier = sessionStorage.getItem(VERIFIER_KEY);
   if (!code || !verifier) return 'The login was interrupted. Log in again.';
@@ -107,7 +110,7 @@ export async function handleCallback(): Promise<string | null> {
       code_verifier: verifier,
     }),
   });
-  if (!res.ok) return `Spotify refused the login (${res.status}). Check that this address is a redirect URI in the Spotify app.`;
+  if (!res.ok) return `Spotify refused the connection (${res.status}). Check that this address is a redirect URI in the Spotify app.`;
   saveToken(await res.json());
   return null;
 }
@@ -129,7 +132,7 @@ export async function getAccessToken(): Promise<string> {
       }),
     });
     if (!res.ok) {
-      logout();
+      disconnectSpotify();
       throw new Error('Spotify session expired. Log in again.');
     }
     saveToken(await res.json());

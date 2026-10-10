@@ -1,45 +1,72 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { handleCallback, isLoggedIn } from './lib/spotify/auth';
+  import { router } from './lib/router.svelte';
+  import { session } from './lib/session.svelte';
+  import { handleCallback } from './lib/spotify/auth';
   import { player } from './lib/spotify/player.svelte';
   import { playlists } from './lib/playlists.svelte';
-  import { game } from './lib/game.svelte';
-  import Login from './views/Login.svelte';
-  import Setup from './views/Setup.svelte';
-  import Game from './views/Game.svelte';
-  import PlaylistEditor from './views/PlaylistEditor.svelte';
+  import Login from './pages/Login.svelte';
+  import Register from './pages/Register.svelte';
+  import Play from './pages/Play.svelte';
+  import Settings from './pages/Settings.svelte';
+  import Admin from './pages/admin/Admin.svelte';
 
-  let loggedIn = $state(isLoggedIn());
-  let loginError = $state<string | null>(null);
-  let busy = $state(true);
-  let view = $state<'play' | 'playlists'>('play');
+  let spotifyError = $state<string | null>(null);
+  let booting = $state(true);
+
+  const PUBLIC = ['/login', '/register'];
 
   onMount(async () => {
-    // Spotify only accepts the redirect URIs registered for the app; locally that's 127.0.0.1.
+    // Spotify only accepts registered redirect URIs: locally that's 127.0.0.1, not localhost.
     if (location.hostname === 'localhost') {
       location.replace(location.href.replace('//localhost', '//127.0.0.1'));
       return;
     }
-    if (location.pathname === '/callback') {
-      loginError = await handleCallback();
-      loggedIn = isLoggedIn();
+    await session.load();
+    if (router.path === '/callback') {
+      spotifyError = await handleCallback();
+      player.connected = !spotifyError;
+      router.go(location.pathname + location.search, true);
     }
-    busy = false;
-    playlists.load();
-    if (loggedIn) player.init().catch((e) => (player.error = String(e.message ?? e)));
+    booting = false;
+  });
+
+  // Route guard + data loading once logged in.
+  $effect(() => {
+    if (booting) return;
+    const isPublic = PUBLIC.includes(router.path);
+    if (!session.user && !isPublic) {
+      const next = router.path === '/' ? '' : `?next=${encodeURIComponent(router.path)}`;
+      router.go(`/login${next}`, true);
+    } else if (session.user && isPublic) {
+      router.go('/', true);
+    } else if (session.user && router.path.startsWith('/admin') && !session.isAdmin) {
+      router.go('/', true);
+    }
+  });
+
+  $effect(() => {
+    if (session.user && !playlists.loaded) playlists.load();
+    if (session.user && player.connected && player.status === 'loading') {
+      player.init().catch((e) => (player.error = String(e?.message ?? e)));
+    }
   });
 </script>
 
-{#if busy}
+{#if booting}
   <div class="boot" aria-busy="true"></div>
-{:else if !loggedIn}
-  <Login error={loginError} />
-{:else if view === 'playlists'}
-  <PlaylistEditor onclose={() => (view = 'play')} />
-{:else if game.phase === 'game'}
-  <Game />
+{:else if router.path === '/login'}
+  <Login />
+{:else if router.path === '/register'}
+  <Register />
+{:else if !session.user}
+  <div class="boot"></div>
+{:else if router.path === '/settings'}
+  <Settings />
+{:else if router.path.startsWith('/admin')}
+  <Admin />
 {:else}
-  <Setup onplaylists={() => (view = 'playlists')} />
+  <Play {spotifyError} />
 {/if}
 
 <style>

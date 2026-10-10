@@ -1,52 +1,36 @@
-// Playlists come from two places:
-//  - bundled: public/playlists/*.json, listed in public/playlists/index.json (committed to git)
-//  - local:   made in the editor, stored in this browser; export them to bundle them.
+// Playlists live on the JPlay server; admins manage them, everyone plays them.
+
+import { api } from './server';
 
 export interface Song {
   uri: string; // spotify:track:...
-  title: string; // display title, cleaned
-  artist: string; // display artists incl. "feat."
+  title: string;
+  artist: string;
   year: number; // the answer: original release year
 }
 
 export interface Playlist {
   id: string;
   name: string;
-  description?: string;
+  description: string;
+  published: boolean;
+  songCount: number;
+  updatedAt: number;
   songs: Song[];
-  source: 'bundled' | 'local';
 }
 
-const LOCAL_KEY = 'jplay.playlists';
-
 class PlaylistStore {
-  bundled = $state<Playlist[]>([]);
-  local = $state<Playlist[]>(readLocal());
+  all = $state<Playlist[]>([]);
   loaded = $state(false);
-
-  all = $derived([...this.bundled, ...this.local]);
+  error = $state<string | null>(null);
 
   async load() {
     try {
-      const res = await fetch('/playlists/index.json', { cache: 'no-cache' });
-      const files: string[] = res.ok ? await res.json() : [];
-      const lists = await Promise.all(
-        files.map(async (f) => {
-          const r = await fetch(`/playlists/${f}`, { cache: 'no-cache' });
-          if (!r.ok) return null;
-          const data = await r.json();
-          return {
-            id: `bundled:${f.replace(/\.json$/, '')}`,
-            name: data.name ?? f,
-            description: data.description,
-            songs: data.songs ?? [],
-            source: 'bundled',
-          } as Playlist;
-        }),
-      );
-      this.bundled = lists.filter((p): p is Playlist => !!p);
-    } catch {
-      this.bundled = [];
+      const r = await api.get<{ playlists: Playlist[] }>('/playlists');
+      this.all = r.playlists;
+      this.error = null;
+    } catch (e) {
+      this.error = (e as Error).message;
     }
     this.loaded = true;
   }
@@ -55,38 +39,32 @@ class PlaylistStore {
     return this.all.find((p) => p.id === id);
   }
 
-  saveLocal(p: Omit<Playlist, 'source'>) {
-    const entry: Playlist = { ...p, source: 'local' };
-    const i = this.local.findIndex((x) => x.id === p.id);
-    if (i >= 0) this.local[i] = entry;
-    else this.local.push(entry);
-    this.persist();
+  async save(p: { id?: string; name: string; description: string; songs: Song[]; published?: boolean }) {
+    const body = { name: p.name, description: p.description, songs: p.songs, published: p.published ?? true };
+    const r = p.id
+      ? await api.put<{ playlist: Playlist }>(`/playlists/${p.id}`, body)
+      : await api.post<{ playlist: Playlist }>('/playlists', body);
+    const i = this.all.findIndex((x) => x.id === r.playlist.id);
+    if (i >= 0) this.all[i] = r.playlist;
+    else this.all.push(r.playlist);
+    return r.playlist;
   }
 
-  deleteLocal(id: string) {
-    this.local = this.local.filter((p) => p.id !== id);
-    this.persist();
+  async setPublished(id: string, published: boolean) {
+    const r = await api.put<{ playlist: Playlist }>(`/playlists/${id}`, { published });
+    const i = this.all.findIndex((x) => x.id === id);
+    if (i >= 0) this.all[i] = r.playlist;
   }
 
-  private persist() {
-    try {
-      localStorage.setItem(LOCAL_KEY, JSON.stringify($state.snapshot(this.local)));
-    } catch {
-      /* ignore */
-    }
-  }
-}
-
-function readLocal(): Playlist[] {
-  try {
-    return JSON.parse(localStorage.getItem(LOCAL_KEY) || '[]');
-  } catch {
-    return [];
+  async remove(id: string) {
+    await api.del(`/playlists/${id}`);
+    this.all = this.all.filter((p) => p.id !== id);
   }
 }
 
-export function exportPlaylist(p: Playlist) {
-  const data = { name: p.name, description: p.description ?? '', songs: p.songs };
+/** Download a playlist as JSON (backup, or to move it to another JPlay). */
+export function exportPlaylist(p: { name: string; description: string; songs: Song[] }) {
+  const data = { name: p.name, description: p.description, songs: p.songs };
   const blob = new Blob([JSON.stringify(data, null, 2) + '\n'], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { game, DEFAULT_OPTIONS } from '../lib/game.svelte';
+  import { game, DEFAULT_OPTIONS } from '../../lib/game.svelte';
 
   let { open = $bindable(false), inGame = false }: { open?: boolean; inGame?: boolean } = $props();
   let dlg: HTMLDialogElement;
@@ -60,16 +60,17 @@
 
 <style>
   dialog {
-    background: var(--night-2);
-    color: var(--ink);
+    background: var(--bg-2);
+    color: var(--text);
     border: 1px solid var(--line);
-    border-radius: var(--r-lg);
+    border-radius: 16px;
     padding: 0;
     width: min(560px, calc(100vw - 32px));
     max-height: calc(100vh - 32px);
+    box-shadow: var(--shadow);
   }
   dialog::backdrop {
-    background: rgb(10 5 25 / 0.7);
+    background: rgb(5 6 12 / 0.7);
   }
   header,
   footer {
@@ -78,7 +79,7 @@
     align-items: center;
     padding: 1rem 1.25rem;
     position: sticky;
-    background: var(--night-2);
+    background: var(--bg-2);
     z-index: 1;
   }
   header {
@@ -96,28 +97,16 @@
     gap: 0.8rem;
   }
   section + section {
-    border-top: 1px dashed var(--line);
+    border-top: 1px solid var(--line);
   }
   h3 {
-    font-size: 1.05rem;
-    font-stretch: 110%;
-    color: var(--gold);
+    font-size: 1rem;
+    color: var(--accent);
   }
   .grid {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 0.8rem;
-  }
-  .check {
-    display: flex;
-    gap: 0.6rem;
-    align-items: flex-start;
-  }
-  .check input {
-    margin-top: 0.3em;
-    accent-color: var(--hot);
-    width: 1.1em;
-    height: 1.1em;
   }
   .indent {
     margin-left: 1.7rem;

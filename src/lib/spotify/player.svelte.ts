@@ -2,7 +2,7 @@
 // device called "JPlay". Plays one track at a time and makes sure nothing
 // else starts afterwards (Spotify autoplay, queue, repeat).
 
-import { getAccessToken } from './auth';
+import { disconnectSpotify, getAccessToken, spotifyConnected } from './auth';
 import { playOn, setRepeatOff, SpotifyError } from './api';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -30,6 +30,7 @@ class HiddenPlayer {
   positionMs = $state(0);
   durationMs = $state(0);
   volume = $state(0.8);
+  connected = $state(spotifyConnected());
 
   private player: any = null;
   private deviceId: string | null = null;
@@ -42,8 +43,19 @@ class HiddenPlayer {
   private stateAt = 0;
   private lastPaused = true;
 
+  private starting = false;
+
   async init() {
-    if (this.player) return;
+    if (this.player || this.starting) return;
+    this.starting = true;
+    try {
+      await this.start();
+    } finally {
+      this.starting = false;
+    }
+  }
+
+  private async start() {
     try {
       const v = localStorage.getItem('jplay.volume');
       if (v) this.volume = Number(v);
@@ -70,7 +82,7 @@ class HiddenPlayer {
     p.addListener('initialization_error', ({ message }: { message: string }) =>
       this.fail(`This browser can't play Spotify here (${message}). Use Chrome, Edge or Firefox on a laptop.`),
     );
-    p.addListener('authentication_error', () => this.fail('Spotify login expired. Log out and log in again.'));
+    p.addListener('authentication_error', () => this.fail('The Spotify connection expired. Connect Spotify again.'));
     p.addListener('account_error', () => this.fail('Playback needs a Spotify Premium account.'));
     p.addListener('playback_error', ({ message }: { message: string }) => (this.error = `Playback failed: ${message}`));
     p.addListener('player_state_changed', (s: any) => this.onState(s));
@@ -223,6 +235,14 @@ class HiddenPlayer {
     } catch {
       /* ignore */
     }
+  }
+
+  /** Forget the Spotify login on this device. */
+  disconnect() {
+    this.destroy();
+    disconnectSpotify();
+    this.connected = false;
+    this.status = 'loading';
   }
 
   destroy() {

@@ -7,28 +7,51 @@ revealed. The app tracks whose turn it is and everyone's tokens (skip, steal, ea
 Live at https://jplay.cloud. The image is `ghcr.io/jpvaneerde/jplay`. Deployment manifests are in
 `jpvaneerde/argocd` under `apps/jplay`.
 
+## How it fits together
+
+One Node server (`server/`) does two jobs. It serves the web app (`src/`, built by Vite) and runs the API under `/api`:
+accounts, invites, sign-in and the shared playlists. Data lives in one SQLite file, `$DATA_DIR/jplay.db`.
+
+- **Accounts are invite-only.** Every player can create 5 invites. Admins have no limit and manage everyone under
+  Admin → Users.
+- **Sign-in** works with an email and password, or with single sign-on: Google, Microsoft, or any OpenID Connect
+  provider. A new single sign-on user still needs an invite. If the provider confirms an email that matches an
+  existing account, the two are linked automatically.
+- **The first admin:** register with the address in `ADMIN_EMAIL`. That's allowed without an invite as long as there
+  is no admin yet.
+- **Spotify** is connected separately in the browser on the laptop that plays the music, using PKCE (no client
+  secret). Only that laptop's Spotify account has to be on the Spotify app's user list.
+
 ## Run it locally
 
 ```sh
 npm install
-npm run dev        # http://127.0.0.1:5173 (Spotify only accepts 127.0.0.1, not localhost)
+npm run dev:server   # API on :8787, data in ./data, ADMIN_EMAIL defaults to admin@example.com
+npm run dev          # web app on http://127.0.0.1:5173 (Spotify only accepts 127.0.0.1, not localhost)
 ```
 
-The Spotify app (client ID `9ae51a4e1077421b9c7088109205190b`) has these redirect URIs:
-`https://jplay.cloud/callback` and `http://127.0.0.1:5173/callback`. To use another client ID, set
-`VITE_SPOTIFY_CLIENT_ID` at build time. There is no client secret: login uses PKCE in the browser.
+## Settings (environment variables)
 
-In Development Mode only Spotify accounts on the app's user list (max 5) can log in. Add them under
-User Management in the Spotify developer dashboard.
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `PUBLIC_URL` | `http://127.0.0.1:5173` | The address people use. Used for invite links, single sign-on redirects and secure cookies. |
+| `ADMIN_EMAIL` | none | This email is always an admin and can register the first account without an invite. |
+| `DATA_DIR` | `./data` | Where `jplay.db` is kept. |
+| `INVITES_PER_USER` | `5` | Invites a new player gets. |
+| `INVITE_DAYS` / `SESSION_DAYS` | `14` / `30` | How long invites and logins last. |
+| `OIDC_GOOGLE_CLIENT_ID` / `_SECRET` | none | Turns on "Log in with Google". |
+| `OIDC_MICROSOFT_CLIENT_ID` / `_SECRET` | none | Turns on "Log in with Microsoft". |
+| `OIDC_MICROSOFT_TENANT` | `common` | Use a tenant ID to allow only your own directory. |
+| `OIDC_PROVIDERS` | none | JSON list for other providers: `[{"id","label","issuer","clientId","clientSecret"}]` |
+
+The redirect URI to register with each provider is `PUBLIC_URL/api/auth/oidc/<id>/callback`, for example
+`https://jplay.cloud/api/auth/oidc/google/callback`.
 
 ## Playlists
 
-- **Bundled playlists** live in `public/playlists/*.json`, listed in `public/playlists/index.json`.
-  They're part of the image, so everyone sees them.
-- **Browser playlists** are made in the app (Playlists → Save) and stay in that browser.
-
-Make a playlist in the app, either from an AI list or from Spotify links, then use **Download JSON**. To bundle
-it, drop the file into `public/playlists/`, add its filename to `index.json`, and push.
+Admins make playlists under **Admin → Playlists**, starting from an AI-generated list, Spotify links or one of their
+own Spotify playlists, or a JSON file. Every player sees the published ones when setting up a game. Use
+**Download JSON** to back a playlist up or move it to another JPlay. The file format:
 
 ```json
 {
@@ -67,12 +90,21 @@ All of this can be changed under Game options. The game survives a page reload.
 
 ## Deploy
 
-Pushing to `main` builds and pushes `ghcr.io/jpvaneerde/jplay:latest` and `:sha-<commit>` (see
-`.github/workflows/build.yml`). The Argo CD app `jplay` runs the image with `imagePullPolicy: Always`. Roll out
-a new `latest` with:
+Pushing to `main` builds `ghcr.io/jpvaneerde/jplay:latest` and `:sha-<commit>`. Before pushing the image, the
+workflow type-checks the code and runs a quick server test. In the cluster it runs as one pod: the SQLite database
+needs a single ReadWriteOnce volume. The pod uses a Longhorn volume mounted at `/data`, and single sign-on secrets
+come from the optional `jplay-oidc` secret. The manifests are in `jpvaneerde/argocd` under `apps/jplay`.
+
+To roll out a new `latest`:
 
 ```sh
 kubectl -n jplay rollout restart deployment/jplay
 ```
 
-You can also pin `sha-…` tags in `apps/jplay/kustomization.yaml`.
+**Backups:** take a Longhorn snapshot or backup of `jplay-data`. For a one-off copy, make a consistent copy inside
+the pod, then fetch it:
+
+```sh
+kubectl -n jplay exec deploy/jplay -- node -e "new (require('node:sqlite').DatabaseSync)('/data/jplay.db').exec(\"VACUUM INTO '/tmp/jplay-backup.db'\")"
+kubectl -n jplay cp "$(kubectl -n jplay get pod -l app=jplay -o name | cut -d/ -f2)":/tmp/jplay-backup.db ./jplay-backup.db
+```

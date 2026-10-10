@@ -1,0 +1,539 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { game } from '../../lib/game.svelte';
+  import { player } from '../../lib/spotify/player.svelte';
+  import { wakeLock } from '../../lib/wakelock.svelte';
+  import Logo from '../../lib/ui/Logo.svelte';
+  import Record from '../../lib/ui/Record.svelte';
+  import Options from './Options.svelte';
+
+  let optionsOpen = $state(false);
+  let historyOpen = $state(false);
+  let confirmEnd = $state(false);
+  // A page reload restores the game, but browsers need a click before audio can play.
+  let armed = $state(false);
+  let playError = $state<string | null>(null);
+  let lastPlayed = '';
+
+  const turn = $derived(game.turn);
+  const song = $derived(turn?.song ?? null);
+  const active = $derived(game.active);
+  const o = $derived(game.options);
+  const revealed = $derived(!!turn?.revealed);
+  const playKey = $derived(turn && song ? `${turn.playerId}|${song.uri}|${game.played.length}` : '');
+
+  onMount(() => {
+    if (player.playState === 'idle' && navigator.userActivation?.isActive) armed = true;
+    wakeLock.enable();
+    return () => wakeLock.disable();
+  });
+
+  $effect(() => {
+    if (!armed || !playKey || player.status !== 'ready' || playKey === lastPlayed) return;
+    lastPlayed = playKey;
+    playError = null;
+    player
+      .play(song!.uri, { startMs: turn!.startMs, limitSec: o.songLimitSec })
+      .catch((e) => (playError = `Couldn't play this song: ${e.message ?? e}`));
+  });
+
+  function arm() {
+    player.activate();
+    armed = true;
+  }
+
+  function endGame() {
+    player.stop();
+    game.end();
+  }
+
+  function onKey(e: KeyboardEvent) {
+    const t = e.target as HTMLElement;
+    if (t.closest('input, textarea, select, dialog') || !armed) return;
+    const k = e.key.toLowerCase();
+    if (k === ' ') {
+      e.preventDefault();
+      player.togglePause();
+    } else if (k === 'r' && !revealed) game.reveal();
+    else if (k === 'n' && revealed) game.next();
+    else if (k === 's' && game.canSkip) game.skip();
+    else if (k === 'enter' && t.tagName !== 'BUTTON') {
+      if (revealed) game.next();
+      else game.reveal();
+    }
+  }
+
+  function fmt(ms: number) {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }
+
+  const progress = $derived(player.durationMs ? Math.min(1, player.positionMs / player.durationMs) : 0);
+  const playing = $derived(player.playState === 'playing');
+  const nextName = $derived.by(() => {
+    if (!turn) return '';
+    const i = game.players.findIndex((p) => p.id === turn.playerId);
+    return game.players[(i + 1) % game.players.length]?.name ?? '';
+  });
+  const stealerNames = $derived(
+    turn ? turn.stealers.map((id) => game.players.find((p) => p.id === id)?.name).filter(Boolean) : [],
+  );
+  const skipReason = $derived(
+    !active || game.canSkip || revealed
+      ? ''
+      : `${active.name} needs ${o.skipCost} token${o.skipCost === 1 ? '' : 's'} to skip`,
+  );
+  const earnedActive = $derived(!!active && !!turn && active.id in turn.earned);
+
+  function coins(n: number) {
+    const total = o.maxTokens > 0 ? Math.max(o.maxTokens, n) : n;
+    return Array.from({ length: total }, (_, i) => i < n);
+  }
+</script>
+
+<svelte:window onkeydown={onKey} />
+
+<div class="page">
+  <header class="top">
+    <Logo height="1.8em" animated={playing} />
+    <div class="meta">
+      <span class="muted">{game.remaining} songs left</span>
+      {#if wakeLock.supported}
+        <span class="lock" class:on={wakeLock.active}>{wakeLock.active ? 'Screen stays on' : 'Screen may sleep'}</span>
+      {/if}
+    </div>
+    <nav>
+      <button class="btn ghost small" onclick={() => (historyOpen = !historyOpen)} aria-expanded={historyOpen}>Played songs</button>
+      <button class="btn ghost small" onclick={() => (optionsOpen = true)}>Options</button>
+      {#if confirmEnd}
+        <button class="btn small danger" onclick={endGame}>Yes, end game</button>
+        <button class="btn ghost small" onclick={() => (confirmEnd = false)}>Keep playing</button>
+      {:else}
+        <button class="btn ghost small" onclick={() => (confirmEnd = true)}>End game</button>
+      {/if}
+    </nav>
+  </header>
+
+  <section class="rail" aria-label="Players">
+    {#each game.players as p (p.id)}
+      {@const isActive = p.id === turn?.playerId}
+      {@const stealing = turn?.stealers.includes(p.id)}
+      <article class="pl card" class:active={isActive} class:stealing>
+        <div class="who">
+          <span class="name">{p.name}</span>
+          <span class="start tabular" title="Start year">{p.startYear}</span>
+        </div>
+        <div class="tokens" aria-label="{p.tokens} tokens">
+          {#each coins(p.tokens) as full, i (i)}<span class="coin" class:empty={!full}></span>{/each}
+          {#if p.tokens === 0 && o.maxTokens === 0}<span class="muted none">no tokens</span>{/if}
+        </div>
+        <div class="row">
+          {#if isActive}
+            <span class="tag turn">Their turn</span>
+          {:else if !revealed}
+            <button
+              class="btn small steal"
+              class:on={stealing}
+              disabled={!game.canSteal(p.id)}
+              onclick={() => game.toggleSteal(p.id)}
+              aria-pressed={stealing}>{stealing ? 'Stealing' : 'Steal'}</button>
+          {:else if stealing}
+            <span class="tag steal-tag">Stole</span>
+            {#if game.canEarn(p.id)}
+              <button class="btn small" class:earned={p.id in (turn?.earned ?? {})} onclick={() => game.toggleEarned(p.id)}>Named it</button>
+            {/if}
+          {/if}
+          <span class="adj">
+            <button class="mini" onclick={() => game.adjust(p.id, -1)} aria-label="Take a token from {p.name}">−</button>
+            <button class="mini" onclick={() => game.adjust(p.id, 1)} aria-label="Give {p.name} a token">+</button>
+          </span>
+        </div>
+      </article>
+    {/each}
+  </section>
+
+  {#if !song}
+    <main class="out">
+      <h2>That's every song in the mix</h2>
+      <p class="muted">Count up the cards on the table, or start a new game with more playlists.</p>
+      <button class="btn primary" onclick={endGame}>End game</button>
+    </main>
+  {:else}
+    <main class="stage">
+      <div class="deck">
+        <Record spinning={playing} {revealed} year={song.year} size="min(400px, 34vw, calc(100vh - 390px))" />
+      </div>
+
+      <div class="info">
+        {#if revealed}
+          <p class="kicker">{active?.name}'s song</p>
+          <h1 class="title">{song.title}</h1>
+          <p class="artist">{song.artist}</p>
+          <p class="year-line">Released in <strong class="tabular">{song.year}</strong></p>
+          {#if stealerNames.length}<p class="stealers">Steal attempt by {stealerNames.join(', ')}</p>{/if}
+        {:else}
+          <p class="kicker">Now playing for</p>
+          <h1 class="title">{active?.name}</h1>
+          <p class="artist muted">Place your card on your timeline. Others can steal before the reveal.</p>
+        {/if}
+
+        <div class="transport">
+          <button class="btn small" onclick={() => player.togglePause()} disabled={!armed}>
+            {playing ? 'Pause' : player.playState === 'ended' ? 'Play again' : 'Play'} <kbd>Space</kbd>
+          </button>
+          <div class="bar" aria-hidden="true"><span style="transform: scaleX({progress})"></span></div>
+          <span class="time tabular muted">{fmt(player.positionMs)}</span>
+          <label class="vol">
+            <span class="sr">Volume</span>
+            <input type="range" min="0" max="1" step="0.05" value={player.volume} oninput={(e) => player.setVolume(+e.currentTarget.value)} />
+          </label>
+        </div>
+        {#if playError || player.error}<p class="notice error">{playError ?? player.error}</p>{/if}
+      </div>
+    </main>
+
+    <footer class="actions">
+      {#if !revealed}
+        <button class="btn big skip" disabled={!game.canSkip} onclick={() => game.skip()} title={skipReason}>
+          Skip song <span class="cost">−{o.skipCost} <span class="coin"></span></span> <kbd>S</kbd>
+        </button>
+        <button class="btn primary big" onclick={() => game.reveal()}>Reveal <kbd>R</kbd></button>
+      {:else}
+        <button
+          class="btn big"
+          class:earned={earnedActive}
+          onclick={() => active && game.toggleEarned(active.id)}
+          aria-pressed={earnedActive}>
+          {active?.name} named title + artist <span class="cost">+1 <span class="coin"></span></span>
+        </button>
+        <button class="btn primary big" onclick={() => game.next()}>Next: {nextName} <kbd>N</kbd></button>
+      {/if}
+    </footer>
+    {#if skipReason}<p class="skip-reason muted">{skipReason}</p>{/if}
+  {/if}
+
+  {#if historyOpen}
+    <aside class="history card" aria-label="Played songs">
+      <header>
+        <h3>Played songs</h3>
+        <button class="btn ghost small" onclick={() => (historyOpen = false)} aria-label="Close">✕</button>
+      </header>
+      {#if !game.history.length}<p class="muted">Revealed songs show up here after each turn.</p>{/if}
+      <ol>
+        {#each game.history as h, i (i)}
+          <li><b class="tabular">{h.song.year}</b> {h.song.title} <span class="muted">— {h.song.artist} · {h.playerName}</span></li>
+        {/each}
+      </ol>
+    </aside>
+  {/if}
+
+  {#if !armed && song}
+    <div class="arm">
+      <button class="btn primary big" onclick={arm}>Continue game</button>
+      <p class="muted">Click to let the browser play sound.</p>
+    </div>
+  {/if}
+</div>
+
+<Options bind:open={optionsOpen} inGame />
+
+<style>
+  .page {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    max-width: 1320px;
+    margin: 0 auto;
+    padding: 0 16px 8px;
+  }
+  .top {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    padding: 12px 0;
+    flex-wrap: wrap;
+  }
+  .meta {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    font-size: 0.875rem;
+    flex: 1;
+  }
+  .lock {
+    color: var(--muted);
+  }
+  .lock.on {
+    color: var(--accent);
+  }
+  nav {
+    display: flex;
+    gap: 0.25rem;
+    flex-wrap: wrap;
+  }
+
+  /* Players */
+  .rail {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 10px;
+  }
+  .pl {
+    padding: 0.7rem 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    border: 2px solid transparent;
+    box-shadow: none;
+  }
+  .pl.active {
+    border-color: var(--accent);
+  }
+  .pl.stealing {
+    border-color: var(--blue);
+  }
+  .who {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.5rem;
+  }
+  .name {
+    font-weight: 800;
+    font-size: 1.05rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .start {
+    font-weight: 800;
+    font-size: 0.85rem;
+    padding: 0.05em 0.5em;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+  .tokens {
+    display: flex;
+    gap: 0.25rem;
+    font-size: 1.1rem;
+    min-height: 1.2em;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .none {
+    font-size: 0.8rem;
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-height: 2rem;
+  }
+  .tag {
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 0.2em 0.6em;
+    border-radius: 999px;
+  }
+  .turn {
+    background: color-mix(in srgb, var(--accent) 20%, transparent);
+    color: var(--accent-2);
+  }
+  .steal-tag {
+    background: var(--blue);
+    color: #fff;
+  }
+  .steal {
+    color: var(--blue);
+    border-color: color-mix(in srgb, var(--blue) 50%, transparent);
+  }
+  .steal.on {
+    background: var(--blue);
+    color: #fff;
+  }
+  .earned {
+    background: var(--gold) !important;
+    color: #2a1c00 !important;
+    border-color: transparent !important;
+  }
+  .adj {
+    margin-left: auto;
+    display: flex;
+    gap: 2px;
+    opacity: 0.3;
+    transition: opacity 0.15s;
+  }
+  .pl:hover .adj,
+  .adj:focus-within {
+    opacity: 1;
+  }
+  .mini {
+    width: 1.6rem;
+    height: 1.6rem;
+    border-radius: 6px;
+    background: var(--card-hover);
+    font-weight: 700;
+  }
+
+  /* Stage */
+  .stage {
+    flex: 1;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: clamp(1.5rem, 4vw, 4rem);
+    padding: 1.5rem 0 1rem;
+  }
+  .deck {
+    display: flex;
+    justify-content: center;
+  }
+  .info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+  .kicker {
+    margin: 0;
+    color: var(--accent-2);
+    font-weight: 700;
+  }
+  .title {
+    font-size: clamp(2rem, 4.2vw, 3.6rem);
+    letter-spacing: -0.03em;
+    overflow-wrap: anywhere;
+  }
+  .artist {
+    margin: 0;
+    font-size: clamp(1.1rem, 2vw, 1.5rem);
+    font-weight: 700;
+    max-width: 36ch;
+  }
+  .year-line {
+    margin: 0.25rem 0 0;
+    color: var(--muted);
+  }
+  .year-line strong {
+    color: var(--text);
+  }
+  .stealers {
+    margin: 0;
+    color: var(--blue);
+    font-weight: 700;
+  }
+  .transport {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    margin-top: 1.5rem;
+    max-width: 520px;
+  }
+  .bar {
+    flex: 1;
+    height: 6px;
+    background: var(--card-hover);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .bar span {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    transform-origin: left;
+  }
+  .time {
+    font-size: 0.875rem;
+    min-width: 2.5rem;
+  }
+  .vol input {
+    width: 90px;
+  }
+  .out {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+  @media (max-width: 820px) {
+    .stage {
+      grid-template-columns: 1fr;
+      justify-items: center;
+      text-align: center;
+    }
+    .info {
+      align-items: center;
+    }
+    .transport {
+      width: 100%;
+    }
+  }
+
+  /* Actions */
+  .actions {
+    position: sticky;
+    bottom: 0;
+    display: flex;
+    justify-content: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    padding: 0.75rem 0 1rem;
+    background: linear-gradient(transparent, var(--bg) 30%);
+  }
+  .skip {
+    color: var(--gold);
+    border-color: color-mix(in srgb, var(--gold) 45%, transparent);
+  }
+  .cost {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2em;
+    font-size: 0.9rem;
+  }
+  .skip-reason {
+    text-align: center;
+    margin: 0 0 0.5rem;
+    font-size: 0.875rem;
+  }
+
+  /* History */
+  .history {
+    position: fixed;
+    right: 16px;
+    top: 64px;
+    bottom: 16px;
+    width: min(380px, calc(100vw - 32px));
+    padding: 1rem 1.2rem;
+    overflow: auto;
+    z-index: 5;
+    background: var(--bg-2);
+  }
+  .history header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .history ol {
+    padding-left: 1.2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .history b {
+    color: var(--accent-2);
+  }
+  .arm {
+    position: fixed;
+    inset: 0;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    z-index: 10;
+  }
+</style>

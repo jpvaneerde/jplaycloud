@@ -1,13 +1,24 @@
-# --- build the static site ---
-FROM node:22-alpine AS build
+# --- build the web app ---
+FROM node:24-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
 RUN npm run build
 
-# --- serve it with unprivileged nginx (listens on 8080, runs as non-root) ---
-FROM nginxinc/nginx-unprivileged:1.27-alpine
-COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /app/dist /usr/share/nginx/html
+# --- runtime: Node serves the API and the built app ---
+FROM node:24-alpine
+WORKDIR /app
+ENV NODE_ENV=production \
+    PORT=8080 \
+    DATA_DIR=/data \
+    STATIC_DIR=/app/dist
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+COPY server ./server
+COPY --from=build /app/dist ./dist
+RUN mkdir -p /data && chown node:node /data
+USER node
+VOLUME /data
 EXPOSE 8080
+CMD ["node", "--experimental-strip-types", "--disable-warning=ExperimentalWarning", "server/index.ts"]
