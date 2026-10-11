@@ -39,7 +39,7 @@ npm run dev          # web app on http://127.0.0.1:5173 (Spotify only accepts 12
 | `PUBLIC_URL` | `http://127.0.0.1:5173` | The address people use. Used for invite links, single sign-on redirects and secure cookies. |
 | `ADMIN_EMAIL` | none | This email is always an admin and can register the first account without an invite. |
 | `DATA_DIR` | `./data` | Where `jplay.db` is kept. |
-| `INVITES_PER_USER` | `5` | Invites a new player gets. |
+| `INVITES_PER_USER` | `unlimited` | Invites each player may hand out: `unlimited`, or a number. Admins are always unlimited. |
 | `INVITE_DAYS` / `SESSION_DAYS` | `14` / `30` | How long invites and logins last. |
 | `GAME_KEEP_DAYS` | `7` | How long a game in progress is kept after the last turn. |
 | `OIDC_GOOGLE_CLIENT_ID` / `_SECRET` | none | Turns on "Log in with Google". |
@@ -59,9 +59,10 @@ The redirect URI to register with each provider is `PUBLIC_URL/api/auth/oidc/<id
 The same pod answers on all three hosts; it picks what to show by host name.
 
 - **jplay.cloud**: the game, playing through Spotify in this browser. Spotify allows only a few people per app in
-  development mode, so only admins, people the admin ticks under Admin → Users, and people with their own Spotify app
-  can play here. Everyone else is pointed to go.jplay.cloud.
-- **go.jplay.cloud**: the same game with the same account, but each turn shows a QR code instead of playing music.
+  development mode, so only the owner (`ADMIN_EMAIL`), people the owner ticks under Admin → Users, and people with
+  their own Spotify app can play here. Other admins can't hand out these places. Everyone else is pointed to
+  go.jplay.cloud.
+- **go.jplay.cloud**: open to everyone with an account (invite links lead here). The same game with the same account, but each turn shows a QR code instead of playing music.
   Someone scans it with their phone, turns the phone face down, and the song plays in that phone's Spotify app.
   Nothing on this site talks to Spotify's developer platform.
 - **scanner.jplay.cloud**: the phone scanner. Scan a code (from the go. screen or a printed card), tap play, turn the

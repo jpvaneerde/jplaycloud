@@ -175,7 +175,10 @@
           {#if invitesLeft === null}Unlimited invites{:else}<strong>{invitesLeft}</strong> invite{invitesLeft === 1 ? "" : "s"} left{/if}
         </span>
       </div>
-      <p class="muted small">Each invite works once and expires after two weeks. Withdraw an unused invite to get it back.</p>
+      <p class="muted small">
+        Invited friends play on go.jplay.cloud: the same game, with songs played from a phone. Each invite works once and
+        expires after two weeks{invitesLeft === null ? '.' : '. Withdraw an unused invite to get it back.'}
+      </p>
       <form onsubmit={makeInvite} class="row-form">
         <label class="field grow"><span>Their email (optional, locks the invite to it)</span><input type="email" bind:value={inviteEmail} /></label>
         <label class="field grow"><span>Note (optional)</span><input bind:value={inviteNote} maxlength="80" placeholder="Sara from book club" /></label>

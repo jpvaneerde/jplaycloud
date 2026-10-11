@@ -2,7 +2,7 @@ import { randomBytes, randomUUID, scrypt, timingSafeEqual, createHash } from 'no
 import type { Context, MiddlewareHandler } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { HTTPException } from 'hono/http-exception';
-import { ADMIN_EMAIL, COOKIE_DOMAIN, INVITES_PER_USER, SECURE_COOKIES, SESSION_DAYS } from './config.ts';
+import { ADMIN_EMAIL, COOKIE_DOMAIN, INVITES_PER_USER, SECURE_COOKIES, SESSION_DAYS, UNLIMITED_INVITES } from './config.ts';
 import { get, run, now } from './db.ts';
 
 export interface User {
@@ -144,13 +144,13 @@ export function publicUser(u: User) {
     email: u.email,
     name: u.name,
     role: u.role,
-    invitesLeft: u.role === 'admin' ? null : u.invites_left,
+    invitesLeft: hasInviteLimit(u) ? u.invites_left : null,
     theme: u.theme,
     hasPassword: !!u.password_hash,
     /** Their own Spotify app, if they set one; otherwise the shared JPlay app is used. */
     spotifyClientId: u.spotify_client_id,
-    /** May use the Spotify version on jplay.cloud: admins, people the admin picked, or anyone with their own Spotify app. */
-    spotifyAccess: u.role === 'admin' || !!u.spotify_access || !!u.spotify_client_id,
+    /** May use the Spotify version on jplay.cloud: the owner, people the owner picked, or anyone with their own Spotify app. */
+    spotifyAccess: isOwner(u.email) || !!u.spotify_access || !!u.spotify_client_id,
     createdAt: u.created_at,
   };
 }
@@ -203,6 +203,16 @@ export function userCount(): number {
 }
 
 /** Bootstrap: the ADMIN_EMAIL may register without an invite while no admin exists. */
+/** The owner (ADMIN_EMAIL): the only one who decides who may use the Spotify version on jplay.cloud. */
+export function isOwner(email: string): boolean {
+  return !!ADMIN_EMAIL && email.toLowerCase() === ADMIN_EMAIL;
+}
+
+/** Whether this person's invites are counted (players, when INVITES_PER_USER is a number). */
+export function hasInviteLimit(u: { role: string }): boolean {
+  return !UNLIMITED_INVITES && u.role !== 'admin';
+}
+
 export function isBootstrapAdmin(email: string): boolean {
   if (!ADMIN_EMAIL || email.toLowerCase() !== ADMIN_EMAIL) return false;
   return !get('SELECT 1 FROM users WHERE role = ?', 'admin');

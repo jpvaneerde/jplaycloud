@@ -4,6 +4,8 @@ import { HTTPException } from 'hono/http-exception';
 import { randomUUID } from 'node:crypto';
 import {
   endAllSessions,
+  hasInviteLimit,
+  isOwner,
   newInviteCode,
   publicUser,
   requireAdmin,
@@ -13,7 +15,7 @@ import {
   type Invite,
   type User,
 } from '../auth.ts';
-import { GAME_KEEP_DAYS, INVITE_DAYS, PUBLIC_URL, SPOTIFY_USERS } from '../config.ts';
+import { ADMIN_EMAIL, GAME_KEEP_DAYS, GO_URL, INVITE_DAYS, SPOTIFY_USERS } from '../config.ts';
 import { all, get, now, run, tx } from '../db.ts';
 
 const bad = (msg: string, status: 400 | 403 | 404 | 409 = 400) => new HTTPException(status, { message: msg });
@@ -21,7 +23,8 @@ const bad = (msg: string, status: 400 | 403 | 404 | 409 = 400) => new HTTPExcept
 function inviteView(i: Invite & { used_by_name?: string | null; created_by_name?: string | null }) {
   return {
     code: i.code,
-    link: `${PUBLIC_URL}/register?invite=${i.code}`,
+    // New people start on go.jplay.cloud; the owner can give them the Spotify version later.
+    link: `${GO_URL}/register?invite=${i.code}`,
     email: i.email,
     note: i.note,
     createdAt: i.created_at,
@@ -45,7 +48,7 @@ invites.get('/', (c) => {
      WHERE i.created_by = ? ORDER BY i.created_at DESC`,
     u.id,
   );
-  return c.json({ invites: list.map(inviteView), invitesLeft: u.role === 'admin' ? null : u.invites_left });
+  return c.json({ invites: list.map(inviteView), invitesLeft: hasInviteLimit(u) ? u.invites_left : null });
 });
 
 invites.post('/', async (c) => {
@@ -55,7 +58,7 @@ invites.post('/', async (c) => {
   if (email && !validEmail(email)) throw bad('That email address looks wrong.');
   const code = newInviteCode();
   tx(() => {
-    if (u.role !== 'admin') {
+    if (hasInviteLimit(u)) {
       const left = get<{ invites_left: number }>('SELECT invites_left FROM users WHERE id = ?', u.id)!.invites_left;
       if (left <= 0) throw bad("You've used all your invites.", 403);
       run('UPDATE users SET invites_left = invites_left - 1 WHERE id = ?', u.id);
@@ -83,7 +86,7 @@ invites.delete('/:code', (c) => {
   tx(() => {
     run('UPDATE invites SET revoked = 1 WHERE code = ?', inv.code);
     const owner = get<User>('SELECT * FROM users WHERE id = ?', inv.created_by);
-    if (owner && owner.role !== 'admin' && inv.expires_at > now()) {
+    if (owner && hasInviteLimit(owner) && inv.expires_at > now()) {
       run('UPDATE users SET invites_left = invites_left + 1 WHERE id = ?', owner.id);
     }
   });
@@ -243,7 +246,8 @@ admin.get('/users', (c) => {
   return c.json({
     users: rows.map((u) => ({
       ...publicUser(u),
-      invitesLeft: u.invites_left,
+      invitesLeft: hasInviteLimit(u) ? u.invites_left : null,
+      owner: isOwner(u.email),
       disabled: !!u.disabled,
       invitedBy: u.invited_by_name,
       invitesUsed: u.invites_used,
@@ -252,6 +256,7 @@ admin.get('/users', (c) => {
       spotifyPicked: !!u.spotify_access,
     })),
     spotifyUsers: SPOTIFY_USERS,
+    canGrantSpotify: isOwner(c.get('user').email),
   });
 });
 
@@ -273,13 +278,15 @@ admin.patch('/users/:id', async (c) => {
     if (b.disabled) endAllSessions(id);
   }
   if (b.spotifyAccess !== undefined) {
-    if (b.spotifyAccess && !target.spotify_access && target.role !== 'admin') {
-      // Spotify's development mode allows only a few users (admins count too). People with their own Spotify app don't count.
+    if (!isOwner(me.email)) throw bad('Only the owner of JPlay can give access to the Spotify version.', 403);
+    if (b.spotifyAccess && !target.spotify_access && !isOwner(target.email)) {
+      // Spotify's development mode allows only a few users (the owner counts too). People with their own Spotify app don't count.
       const used = get<{ n: number }>(
-        "SELECT COUNT(*) n FROM users WHERE (role = 'admin' OR spotify_access = 1) AND spotify_client_id IS NULL AND disabled = 0",
+        'SELECT COUNT(*) n FROM users WHERE (lower(email) = ? OR spotify_access = 1) AND spotify_client_id IS NULL AND disabled = 0',
+        ADMIN_EMAIL,
       )!.n;
       if (used >= SPOTIFY_USERS) {
-        throw bad(`Spotify only allows ${SPOTIFY_USERS} people on your Spotify app (admins included). Take someone else off first.`);
+        throw bad(`Spotify only allows ${SPOTIFY_USERS} people on your Spotify app (you included). Take someone else off first.`);
       }
     }
     run('UPDATE users SET spotify_access = ? WHERE id = ?', b.spotifyAccess ? 1 : 0, id);

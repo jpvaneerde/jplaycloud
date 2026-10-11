@@ -8,7 +8,8 @@
     email: string;
     name: string;
     role: 'user' | 'admin';
-    invitesLeft: number;
+    invitesLeft: number | null;
+    owner: boolean;
     disabled: boolean;
     invitedBy: string | null;
     invitesUsed: number;
@@ -25,12 +26,14 @@
   let confirmDelete = $state<string | null>(null);
   let query = $state('');
   let spotifyUsers = $state(5);
+  let canGrant = $state(false);
 
   async function load() {
     try {
-      const r = await api.get<{ users: AdminUser[]; spotifyUsers: number }>('/admin/users');
+      const r = await api.get<{ users: AdminUser[]; spotifyUsers: number; canGrantSpotify: boolean }>('/admin/users');
       users = r.users;
       spotifyUsers = r.spotifyUsers;
+      canGrant = r.canGrantSpotify;
     } catch (e) {
       error = (e as Error).message;
     }
@@ -64,7 +67,7 @@
     t ? new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : 'never';
 
   // Who uses the shared JPlay Spotify app (people with their own Spotify app don't count).
-  const spotifyUsed = $derived(users.filter((u) => !u.disabled && !u.spotifyClientId && (u.role === 'admin' || u.spotifyPicked)).length);
+  const spotifyUsed = $derived(users.filter((u) => !u.disabled && !u.spotifyClientId && (u.owner || u.spotifyPicked)).length);
 
   const shown = $derived(
     users.filter((u) => !query || `${u.name} ${u.email}`.toLowerCase().includes(query.toLowerCase())),
@@ -73,8 +76,9 @@
 
 <div class="top">
   <p class="muted">
-    {users.length} people on JPlay. Everyone can invite others; admins have unlimited invites.
-    <b>{spotifyUsed} of {spotifyUsers}</b> Spotify places used: those people play on jplay.cloud, everyone else on go.jplay.cloud.
+    {users.length} people on JPlay. Everyone can invite others to go.jplay.cloud.
+    <b>{spotifyUsed} of {spotifyUsers}</b> Spotify places used: those people also play on jplay.cloud.
+    {canGrant ? 'Only you can give out these places.' : 'Only the owner can give out these places.'}
   </p>
   <input class="search" type="search" placeholder="Find someone" bind:value={query} aria-label="Find a user" />
 </div>
@@ -106,7 +110,7 @@
               </select>
             </td>
             <td>
-              {#if u.role === 'admin'}
+              {#if u.invitesLeft === null}
                 <span class="muted">Unlimited</span>
               {:else}
                 <input
@@ -120,8 +124,8 @@
               {/if}
             </td>
             <td>
-              {#if u.role === 'admin'}
-                <span class="muted">Always</span>
+              {#if u.owner}
+                <span class="muted">Always (owner)</span>
               {:else if u.spotifyClientId}
                 <span class="muted" title="Uses their own Spotify app, so doesn't take one of your places">Own Spotify app</span>
               {:else}
@@ -129,7 +133,7 @@
                   <input
                     type="checkbox"
                     checked={u.spotifyPicked}
-                    disabled={!u.spotifyPicked && spotifyUsed >= spotifyUsers}
+                    disabled={!canGrant || (!u.spotifyPicked && spotifyUsed >= spotifyUsers)}
                     onchange={(e) => update(u, { spotifyAccess: e.currentTarget.checked })} />
                   {u.spotifyPicked ? 'Yes' : 'No'}
                 </label>
@@ -155,8 +159,9 @@
   </div>
   <p class="muted small">Turning someone off logs them out everywhere and stops them logging in. Their invites stay valid.</p>
   <p class="muted small">
-    Spotify version: Spotify lets only {spotifyUsers} people use your Spotify app while it's in development mode. Tick the people
-    who may play on jplay.cloud, and add the same people (their Spotify email) under User Management in your Spotify developer dashboard.
+    Spotify version: Spotify lets only {spotifyUsers} people use the JPlay Spotify app while it's in development mode. The owner ticks
+    who may play on jplay.cloud and adds the same people (their Spotify email) under User Management in the Spotify developer dashboard.
+    Everyone can always play on go.jplay.cloud.
   </p>
 {/if}
 

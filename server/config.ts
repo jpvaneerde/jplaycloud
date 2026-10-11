@@ -8,7 +8,9 @@ export const DATA_DIR = env.DATA_DIR || './data';
 export const STATIC_DIR = env.STATIC_DIR || './dist';
 /** This email becomes admin; it may register without an invite while no users exist. */
 export const ADMIN_EMAIL = (env.ADMIN_EMAIL || '').trim().toLowerCase();
-export const INVITES_PER_USER = Number(env.INVITES_PER_USER || 5);
+/** Invites each player may hand out: a number, or "unlimited" (the default). Admins are always unlimited. */
+export const UNLIMITED_INVITES = (env.INVITES_PER_USER || 'unlimited').trim().toLowerCase() === 'unlimited';
+export const INVITES_PER_USER = UNLIMITED_INVITES ? 5 : Number(env.INVITES_PER_USER) || 5;
 export const INVITE_DAYS = Number(env.INVITE_DAYS || 14);
 export const SESSION_DAYS = Number(env.SESSION_DAYS || 30);
 /** A game in progress is kept this many days after it was last played. */
