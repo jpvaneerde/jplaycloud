@@ -10,6 +10,7 @@
   import Shell from '../../lib/ui/Shell.svelte';
   import Options from './Options.svelte';
   import { QR_MODE, otherUrl } from '../../lib/mode';
+  import ScannerInvite from '../../lib/ui/ScannerInvite.svelte';
 
   let { spotifyError = null }: { spotifyError?: string | null } = $props();
   let optionsOpen = $state(false);
@@ -101,18 +102,12 @@
   {/if}
 
   {#if QR_MODE}
-    <section class="card speaker ok">
-      <div class="sp-icon qr-icon" aria-hidden="true"><span></span></div>
-      <div class="sp-text">
-        <h2>Songs play from a phone</h2>
-        <p class="muted">
-          Each turn shows a QR code. Scan it with the phone camera, turn the phone face down, and the song starts in the
-          Spotify app on that phone. Nothing plays on this computer.
-        </p>
-        {#if spotifyAllowed}
-          <a class="small-link" href={otherUrl('/')}>Play through Spotify on this computer instead (jplay.cloud)</a>
-        {/if}
-      </div>
+    <section class="card speaker ok scanner-card">
+      <ScannerInvite />
+      <p class="muted small-print">
+        Songs play from a phone: each turn shows a QR code on this screen, and nothing plays on this computer.
+        {#if spotifyAllowed}<a href={otherUrl('/')}>Play through Spotify on this computer instead (jplay.cloud)</a>{/if}
+      </p>
     </section>
   {:else if !spotifyAllowed}
     <section class="card speaker">
@@ -429,11 +424,12 @@
     padding: 0;
     font-size: inherit;
   }
-  .qr-icon span {
-    border-radius: 3px;
-    background:
-      linear-gradient(90deg, var(--accent) 50%, transparent 0) 0 0 / 50% 50%,
-      linear-gradient(var(--accent) 50%, transparent 0) 0 0 / 50% 50%;
+  .scanner-card {
+    display: block;
+  }
+  .small-print {
+    margin: 1rem 0 0;
+    font-size: 0.85rem;
   }
   .qr-switch {
     flex-basis: 100%;

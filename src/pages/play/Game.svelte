@@ -10,6 +10,9 @@
   import Options from './Options.svelte';
   import QRCode from 'qrcode';
   import { QR_MODE, qrText } from '../../lib/mode';
+  import ScannerInvite from '../../lib/ui/ScannerInvite.svelte';
+
+  let scannerOpen = $state(false);
 
   let optionsOpen = $state(false);
   let historyOpen = $state(false);
@@ -213,6 +216,7 @@
     </div>
     <nav>
       <button class="btn ghost small" onclick={() => (historyOpen = !historyOpen)} aria-expanded={historyOpen}>Played songs</button>
+      {#if QR_MODE}<button class="btn ghost small" onclick={() => (scannerOpen = true)}>Phone scanner</button>{/if}
       <button class="btn ghost small" onclick={() => (optionsOpen = true)}>Options</button>
       <button class="btn ghost small" onclick={pauseGame} disabled={pausing}>{pausing ? 'Pausing…' : 'Pause game'}</button>
       {#if confirmEnd}
@@ -415,6 +419,15 @@
     </div>
   {/if}
 
+  {#if scannerOpen}
+    <div class="arm" role="presentation" onclick={(e) => e.target === e.currentTarget && (scannerOpen = false)}>
+      <div class="resume card scanner-pop" role="dialog" aria-label="Phone scanner">
+        <ScannerInvite compact />
+        <button class="btn primary" onclick={() => (scannerOpen = false)}>Done</button>
+      </div>
+    </div>
+  {/if}
+
   {#if !armed}
     <div class="arm">
       <div class="resume card" role="dialog" aria-labelledby="resume-title">
@@ -490,6 +503,12 @@
     font-weight: 800;
     font-size: 0.95rem;
     text-align: center;
+  }
+  .scanner-pop {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
   }
   .qr-help {
     margin: 1rem 0 0;
