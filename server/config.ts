@@ -15,6 +15,26 @@ export const SESSION_DAYS = Number(env.SESSION_DAYS || 30);
 export const GAME_KEEP_DAYS = Number(env.GAME_KEEP_DAYS || 7);
 export const SECURE_COOKIES = PUBLIC_URL.startsWith('https://');
 export const PUBLIC_ORIGIN = new URL(PUBLIC_URL).origin;
+/** The card scanner (QR codes point here). Defaults to scanner.<your host>,
+ *  or <public url>/scanner when running locally over http. */
+export const SCAN_URL = (
+  env.SCAN_URL ||
+  (SECURE_COOKIES ? `https://scanner.${new URL(PUBLIC_URL).host}` : `${PUBLIC_URL}/scanner`)
+).replace(/\/$/, '');
+export const SCAN_HOST = new URL(SCAN_URL).host;
+/** The QR-code game (songs play from a phone, no Spotify on the computer). Defaults to go.<your host>,
+ *  or http://go.localhost:<port> when running locally. */
+export const GO_URL = (
+  env.GO_URL ||
+  (SECURE_COOKIES
+    ? `https://go.${new URL(PUBLIC_URL).host}`
+    : `http://go.localhost${new URL(PUBLIC_URL).port ? ':' + new URL(PUBLIC_URL).port : ''}`)
+).replace(/\/$/, '');
+export const GO_ORIGIN = new URL(GO_URL).origin;
+/** One login for jplay.cloud and its subdomains (go., scanner.). Empty = this host only. */
+export const COOKIE_DOMAIN = env.COOKIE_DOMAIN ?? (SECURE_COOKIES ? new URL(PUBLIC_URL).hostname : '');
+/** How many people may use the Spotify version (Spotify's development-mode limit). */
+export const SPOTIFY_USERS = Number(env.SPOTIFY_USERS || 5);
 
 export interface OidcProviderConfig {
   id: string;

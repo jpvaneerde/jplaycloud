@@ -15,6 +15,8 @@
     providers: string[];
     createdAt: number;
     lastLoginAt: number | null;
+    spotifyPicked: boolean;
+    spotifyClientId: string | null;
   }
 
   let users = $state<AdminUser[]>([]);
@@ -22,10 +24,13 @@
   let error = $state<string | null>(null);
   let confirmDelete = $state<string | null>(null);
   let query = $state('');
+  let spotifyUsers = $state(5);
 
   async function load() {
     try {
-      users = (await api.get<{ users: AdminUser[] }>('/admin/users')).users;
+      const r = await api.get<{ users: AdminUser[]; spotifyUsers: number }>('/admin/users');
+      users = r.users;
+      spotifyUsers = r.spotifyUsers;
     } catch (e) {
       error = (e as Error).message;
     }
@@ -33,7 +38,7 @@
   }
   onMount(load);
 
-  async function update(u: AdminUser, patch: Partial<{ role: string; disabled: boolean; invitesLeft: number }>) {
+  async function update(u: AdminUser, patch: Partial<{ role: string; disabled: boolean; invitesLeft: number; spotifyAccess: boolean }>) {
     error = null;
     try {
       await api.patch(`/admin/users/${u.id}`, patch);
@@ -58,13 +63,19 @@
   const date = (t: number | null) =>
     t ? new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : 'never';
 
+  // Who uses the shared JPlay Spotify app (people with their own Spotify app don't count).
+  const spotifyUsed = $derived(users.filter((u) => !u.disabled && !u.spotifyClientId && (u.role === 'admin' || u.spotifyPicked)).length);
+
   const shown = $derived(
     users.filter((u) => !query || `${u.name} ${u.email}`.toLowerCase().includes(query.toLowerCase())),
   );
 </script>
 
 <div class="top">
-  <p class="muted">{users.length} people on JPlay. Everyone can invite others; admins have unlimited invites.</p>
+  <p class="muted">
+    {users.length} people on JPlay. Everyone can invite others; admins have unlimited invites.
+    <b>{spotifyUsed} of {spotifyUsers}</b> Spotify places used: those people play on jplay.cloud, everyone else on go.jplay.cloud.
+  </p>
   <input class="search" type="search" placeholder="Find someone" bind:value={query} aria-label="Find a user" />
 </div>
 {#if error}<p class="notice error">{error}</p>{/if}
@@ -75,7 +86,7 @@
   <div class="card wrap">
     <table>
       <thead>
-        <tr><th>Person</th><th>Role</th><th>Invites left</th><th>Joined</th><th>Last login</th><th><span class="sr">Actions</span></th></tr>
+        <tr><th>Person</th><th>Role</th><th>Invites left</th><th>Spotify version</th><th>Joined</th><th>Last login</th><th><span class="sr">Actions</span></th></tr>
       </thead>
       <tbody>
         {#each shown as u (u.id)}
@@ -108,6 +119,22 @@
                   aria-label="Invites left for {u.name}" />
               {/if}
             </td>
+            <td>
+              {#if u.role === 'admin'}
+                <span class="muted">Always</span>
+              {:else if u.spotifyClientId}
+                <span class="muted" title="Uses their own Spotify app, so doesn't take one of your places">Own Spotify app</span>
+              {:else}
+                <label class="check">
+                  <input
+                    type="checkbox"
+                    checked={u.spotifyPicked}
+                    disabled={!u.spotifyPicked && spotifyUsed >= spotifyUsers}
+                    onchange={(e) => update(u, { spotifyAccess: e.currentTarget.checked })} />
+                  {u.spotifyPicked ? 'Yes' : 'No'}
+                </label>
+              {/if}
+            </td>
             <td class="muted">{date(u.createdAt)}</td>
             <td class="muted">{date(u.lastLoginAt)}</td>
             <td class="acts">
@@ -127,6 +154,10 @@
     </table>
   </div>
   <p class="muted small">Turning someone off logs them out everywhere and stops them logging in. Their invites stay valid.</p>
+  <p class="muted small">
+    Spotify version: Spotify lets only {spotifyUsers} people use your Spotify app while it's in development mode. Tick the people
+    who may play on jplay.cloud, and add the same people (their Spotify email) under User Management in your Spotify developer dashboard.
+  </p>
 {/if}
 
 <style>

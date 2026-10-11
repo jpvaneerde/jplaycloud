@@ -2,7 +2,7 @@ import { randomBytes, randomUUID, scrypt, timingSafeEqual, createHash } from 'no
 import type { Context, MiddlewareHandler } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { HTTPException } from 'hono/http-exception';
-import { ADMIN_EMAIL, INVITES_PER_USER, SECURE_COOKIES, SESSION_DAYS } from './config.ts';
+import { ADMIN_EMAIL, COOKIE_DOMAIN, INVITES_PER_USER, SECURE_COOKIES, SESSION_DAYS } from './config.ts';
 import { get, run, now } from './db.ts';
 
 export interface User {
@@ -16,13 +16,31 @@ export interface User {
   theme: string;
   invited_by: string | null;
   spotify_client_id: string | null;
+  spotify_access: number;
   created_at: number;
   last_login_at: number | null;
 }
 
 export type Env = { Variables: { user: User } };
 
-const COOKIE = SECURE_COOKIES ? '__Host-jplay' : 'jplay';
+// Shared by jplay.cloud and its subdomains when COOKIE_DOMAIN is set (__Secure- allows a domain).
+const COOKIE = SECURE_COOKIES ? (COOKIE_DOMAIN ? '__Secure-jplay' : '__Host-jplay') : 'jplay';
+const LEGACY_COOKIE = '__Host-jplay'; // sessions from before the shared login keep working
+
+function sessionToken(c: Context) {
+  return getCookie(c, COOKIE) ?? (COOKIE !== LEGACY_COOKIE && SECURE_COOKIES ? getCookie(c, LEGACY_COOKIE) : undefined);
+}
+
+function setSessionCookie(c: Context, token: string) {
+  setCookie(c, COOKIE, token, {
+    httpOnly: true,
+    secure: SECURE_COOKIES,
+    sameSite: 'Lax',
+    path: '/',
+    maxAge: SESSION_DAYS * 86_400,
+    ...(COOKIE_DOMAIN && SECURE_COOKIES ? { domain: COOKIE_DOMAIN } : {}),
+  });
+}
 
 /* ---------- passwords (scrypt) ---------- */
 
@@ -71,19 +89,14 @@ export function startSession(c: Context, userId: string) {
   const expires = now() + SESSION_DAYS * 86_400_000;
   run('INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)', sha(token), userId, now(), expires);
   run('UPDATE users SET last_login_at = ? WHERE id = ?', now(), userId);
-  setCookie(c, COOKIE, token, {
-    httpOnly: true,
-    secure: SECURE_COOKIES,
-    sameSite: 'Lax',
-    path: '/',
-    maxAge: SESSION_DAYS * 86_400,
-  });
+  setSessionCookie(c, token);
 }
 
 export function endSession(c: Context) {
-  const token = getCookie(c, COOKIE);
+  const token = sessionToken(c);
   if (token) run('DELETE FROM sessions WHERE id = ?', sha(token));
-  deleteCookie(c, COOKIE, { path: '/', secure: SECURE_COOKIES });
+  deleteCookie(c, COOKIE, { path: '/', secure: SECURE_COOKIES, ...(COOKIE_DOMAIN && SECURE_COOKIES ? { domain: COOKIE_DOMAIN } : {}) });
+  if (COOKIE !== LEGACY_COOKIE && SECURE_COOKIES) deleteCookie(c, LEGACY_COOKIE, { path: '/', secure: true });
 }
 
 export function endAllSessions(userId: string) {
@@ -91,13 +104,18 @@ export function endAllSessions(userId: string) {
 }
 
 export function currentUser(c: Context): User | null {
-  const token = getCookie(c, COOKIE);
+  const token = sessionToken(c);
   if (!token) return null;
   const row = get<User & { expires_at: number }>(
     `SELECT u.*, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.id = ?`,
     sha(token),
   );
   if (!row || row.expires_at < now() || row.disabled) return null;
+  // An older host-only session: move it to the shared cookie so go.jplay.cloud knows it too.
+  if (SECURE_COOKIES && COOKIE !== LEGACY_COOKIE && !getCookie(c, COOKIE)) {
+    setSessionCookie(c, token);
+    deleteCookie(c, LEGACY_COOKIE, { path: '/', secure: true });
+  }
   // Sliding expiry: extend once less than half the lifetime is left.
   if (row.expires_at - now() < (SESSION_DAYS * 86_400_000) / 2) {
     run('UPDATE sessions SET expires_at = ? WHERE id = ?', now() + SESSION_DAYS * 86_400_000, sha(token));
@@ -131,6 +149,8 @@ export function publicUser(u: User) {
     hasPassword: !!u.password_hash,
     /** Their own Spotify app, if they set one; otherwise the shared JPlay app is used. */
     spotifyClientId: u.spotify_client_id,
+    /** May use the Spotify version on jplay.cloud: admins, people the admin picked, or anyone with their own Spotify app. */
+    spotifyAccess: u.role === 'admin' || !!u.spotify_access || !!u.spotify_client_id,
     createdAt: u.created_at,
   };
 }

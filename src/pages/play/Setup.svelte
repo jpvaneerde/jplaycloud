@@ -9,13 +9,16 @@
   import { session } from '../../lib/session.svelte';
   import Shell from '../../lib/ui/Shell.svelte';
   import Options from './Options.svelte';
+  import { QR_MODE, otherUrl } from '../../lib/mode';
 
   let { spotifyError = null }: { spotifyError?: string | null } = $props();
   let optionsOpen = $state(false);
   let inputs: HTMLInputElement[] = $state([]);
 
   const filled = $derived(game.names.filter((n) => n.trim()).length);
-  const ready = $derived(player.connected && player.status === 'ready');
+  // jplay.cloud plays through Spotify on this computer, which Spotify allows for only a few people.
+  const spotifyAllowed = $derived(!!session.user?.spotifyAccess);
+  const ready = $derived(QR_MODE || (spotifyAllowed && player.connected && player.status === 'ready'));
   const canStart = $derived(filled >= 1 && game.pool.length > 0 && ready);
 
   // Drop playlists that no longer exist; preselect the first one.
@@ -54,7 +57,7 @@
   }
 
   function start() {
-    player.activate(); // this click unlocks audio
+    if (!QR_MODE) player.activate(); // this click unlocks audio
     wakeLock.enable();
     game.start();
   }
@@ -62,11 +65,13 @@
   const visibleLists = $derived(playlists.all.filter((p) => p.published));
 
   const hint = $derived(
-    !player.connected
+    !QR_MODE && !spotifyAllowed
+      ? 'Play the QR version on go.jplay.cloud.'
+      : !QR_MODE && !player.connected
       ? 'Connect Spotify first.'
-      : player.status === 'error'
+      : !QR_MODE && player.status === 'error'
         ? player.error
-        : player.status === 'loading'
+        : !QR_MODE && player.status === 'loading'
           ? 'Connecting to Spotify…'
           : !game.pool.length
             ? 'Pick a playlist with songs in it.'
@@ -95,6 +100,34 @@
     </p>
   {/if}
 
+  {#if QR_MODE}
+    <section class="card speaker ok">
+      <div class="sp-icon qr-icon" aria-hidden="true"><span></span></div>
+      <div class="sp-text">
+        <h2>Songs play from a phone</h2>
+        <p class="muted">
+          Each turn shows a QR code. Scan it with the phone camera, turn the phone face down, and the song starts in the
+          Spotify app on that phone. Nothing plays on this computer.
+        </p>
+        {#if spotifyAllowed}
+          <a class="small-link" href={otherUrl('/')}>Play through Spotify on this computer instead (jplay.cloud)</a>
+        {/if}
+      </div>
+    </section>
+  {:else if !spotifyAllowed}
+    <section class="card speaker">
+      <div class="sp-icon" aria-hidden="true"><span></span></div>
+      <div class="sp-text">
+        <h2>Play the QR version</h2>
+        <p class="muted">
+          Spotify only lets a few people play through a small app like this one, so this version is limited. On
+          go.jplay.cloud you play the same game with your account: each song is a QR code that a phone scans and plays in its own Spotify app.
+        </p>
+        <a class="small-link" href="/settings#spotify" onclick={router.link}>Or use your own Spotify app (Settings)</a>
+      </div>
+      <a class="btn primary" href={otherUrl('/')}>Go to go.jplay.cloud</a>
+    </section>
+  {:else}
   <section class="card speaker" class:ok={ready}>
     <div class="sp-icon" aria-hidden="true"><span></span></div>
     <div class="sp-text">
@@ -121,7 +154,9 @@
     {:else}
       <button class="btn ghost small" onclick={() => player.disconnect()}>Disconnect</button>
     {/if}
+    <a class="small-link qr-switch" href={otherUrl('/')}>Play with QR codes and a phone instead</a>
   </section>
+  {/if}
 
   <div class="grid">
     <section class="card pane">
@@ -217,8 +252,9 @@
   }
   .speaker {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 1.25rem;
+    gap: 0.6rem 1.25rem;
     padding: 1.1rem 1.25rem;
     margin-bottom: 1.25rem;
     border-left: 4px solid var(--blue);
@@ -392,6 +428,17 @@
     text-decoration: underline;
     padding: 0;
     font-size: inherit;
+  }
+  .qr-icon span {
+    border-radius: 3px;
+    background:
+      linear-gradient(90deg, var(--accent) 50%, transparent 0) 0 0 / 50% 50%,
+      linear-gradient(var(--accent) 50%, transparent 0) 0 0 / 50% 50%;
+  }
+  .qr-switch {
+    flex-basis: 100%;
+    margin: 0;
+    font-size: 0.8rem;
   }
   .small-link {
     display: inline-block;

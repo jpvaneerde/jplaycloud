@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { cardByCode, cardUrl, CODE_RE, ensureCards } from '../cards.ts';
 import { HTTPException } from 'hono/http-exception';
 import { randomUUID } from 'node:crypto';
 import {
@@ -12,7 +13,7 @@ import {
   type Invite,
   type User,
 } from '../auth.ts';
-import { GAME_KEEP_DAYS, INVITE_DAYS, PUBLIC_URL } from '../config.ts';
+import { GAME_KEEP_DAYS, INVITE_DAYS, PUBLIC_URL, SPOTIFY_USERS } from '../config.ts';
 import { all, get, now, run, tx } from '../db.ts';
 
 const bad = (msg: string, status: 400 | 403 | 404 | 409 = 400) => new HTTPException(status, { message: msg });
@@ -151,7 +152,20 @@ playlists.get('/', (c) => {
     `SELECT * FROM playlists ${admin ? '' : 'WHERE published = 1'} ORDER BY name COLLATE NOCASE`,
   );
   // Everyone gets the songs: the game picks from them in the browser.
-  return c.json({ playlists: rows.map((p) => playlistView(p, true)) });
+  // Each song carries its card code, so go.jplay.cloud can show it as a QR code.
+  const codes = new Map(all<{ uri: string; code: string }>('SELECT uri, code FROM cards').map((r) => [r.uri, r.code]));
+  return c.json({
+    playlists: rows.map((p) => {
+      const v = playlistView(p, true);
+      return {
+        ...v,
+        songs: v.songs!.map((s) => {
+          const code = codes.get(s.uri);
+          return code ? { ...s, code, qr: cardUrl(code) } : s;
+        }),
+      };
+    }),
+  });
 });
 
 playlists.post('/', requireAdmin, async (c) => {
@@ -170,7 +184,9 @@ playlists.post('/', requireAdmin, async (c) => {
     now(),
     now(),
   );
-  return c.json({ playlist: playlistView(get<PlaylistRow>('SELECT * FROM playlists WHERE id = ?', id)!, true) });
+  const row = get<PlaylistRow>('SELECT * FROM playlists WHERE id = ?', id)!;
+  ensureCards(JSON.parse(row.songs)); // every song gets a printable card code
+  return c.json({ playlist: playlistView(row, true) });
 });
 
 playlists.put('/:id', requireAdmin, async (c) => {
@@ -189,7 +205,21 @@ playlists.put('/:id', requireAdmin, async (c) => {
     now(),
     id,
   );
-  return c.json({ playlist: playlistView(get<PlaylistRow>('SELECT * FROM playlists WHERE id = ?', id)!, true) });
+  const row = get<PlaylistRow>('SELECT * FROM playlists WHERE id = ?', id)!;
+  ensureCards(JSON.parse(row.songs));
+  return c.json({ playlist: playlistView(row, true) });
+});
+
+// Printable cards for a playlist: one per song, with its QR link.
+playlists.get('/:id/cards', (c) => {
+  const p = get<PlaylistRow>('SELECT * FROM playlists WHERE id = ?', c.req.param('id'));
+  if (!p || (!p.published && c.get('user').role !== 'admin')) throw bad('Playlist not found.', 404);
+  const songs = JSON.parse(p.songs) as Song[];
+  const codes = ensureCards(songs);
+  return c.json({
+    name: p.name,
+    cards: songs.map((s) => ({ code: codes.get(s.uri)!, url: cardUrl(codes.get(s.uri)!), title: s.title, artist: s.artist, year: s.year })),
+  });
 });
 
 playlists.delete('/:id', requireAdmin, (c) => {
@@ -219,7 +249,9 @@ admin.get('/users', (c) => {
       invitesUsed: u.invites_used,
       providers: u.providers ? u.providers.split(',') : [],
       lastLoginAt: u.last_login_at,
+      spotifyPicked: !!u.spotify_access,
     })),
+    spotifyUsers: SPOTIFY_USERS,
   });
 });
 
@@ -228,7 +260,7 @@ admin.patch('/users/:id', async (c) => {
   const id = c.req.param('id');
   const target = get<User>('SELECT * FROM users WHERE id = ?', id);
   if (!target) throw bad('User not found.', 404);
-  const b = await c.req.json<{ role?: string; disabled?: boolean; invitesLeft?: number }>();
+  const b = await c.req.json<{ role?: string; disabled?: boolean; invitesLeft?: number; spotifyAccess?: boolean }>();
   if (id === me.id && (b.role === 'user' || b.disabled)) {
     throw bad("You can't remove your own admin rights or turn off your own account.");
   }
@@ -239,6 +271,18 @@ admin.patch('/users/:id', async (c) => {
   if (b.disabled !== undefined) {
     run('UPDATE users SET disabled = ? WHERE id = ?', b.disabled ? 1 : 0, id);
     if (b.disabled) endAllSessions(id);
+  }
+  if (b.spotifyAccess !== undefined) {
+    if (b.spotifyAccess && !target.spotify_access && target.role !== 'admin') {
+      // Spotify's development mode allows only a few users (admins count too). People with their own Spotify app don't count.
+      const used = get<{ n: number }>(
+        "SELECT COUNT(*) n FROM users WHERE (role = 'admin' OR spotify_access = 1) AND spotify_client_id IS NULL AND disabled = 0",
+      )!.n;
+      if (used >= SPOTIFY_USERS) {
+        throw bad(`Spotify only allows ${SPOTIFY_USERS} people on your Spotify app (admins included). Take someone else off first.`);
+      }
+    }
+    run('UPDATE users SET spotify_access = ? WHERE id = ?', b.spotifyAccess ? 1 : 0, id);
   }
   if (b.invitesLeft !== undefined) {
     const n = Math.max(0, Math.min(1000, Math.floor(Number(b.invitesLeft) || 0)));
@@ -414,4 +458,15 @@ history.post('/:id/resume', (c) => {
 history.delete('/:id', (c) => {
   run('DELETE FROM finished_games WHERE id = ? AND user_id = ?', c.req.param('id'), c.get('user').id);
   return c.json({ ok: true });
+});
+
+/* ---------- cards (public: the scanner on scanner.jplay.cloud has no login) ---------- */
+
+export const cards = new Hono<Env>();
+
+cards.get('/:code', (c) => {
+  const code = c.req.param('code').toUpperCase();
+  const card = CODE_RE.test(code) ? cardByCode(code) : undefined;
+  if (!card) throw bad("This card isn't known to JPlay.", 404);
+  return c.json({ card });
 });

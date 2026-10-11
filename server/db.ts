@@ -84,6 +84,18 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS finished_games_user ON finished_games (user_id, ended_at DESC);
 
+  -- Printed cards: a short code per song (QR on the card -> scanner.jplay.cloud/CODE).
+  -- Codes are never removed, so printed cards keep working after a playlist changes.
+  CREATE TABLE IF NOT EXISTS cards (
+    code       TEXT PRIMARY KEY,
+    uri        TEXT NOT NULL UNIQUE,
+    title      TEXT NOT NULL,
+    artist     TEXT NOT NULL,
+    year       INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS oidc_states (
     state       TEXT PRIMARY KEY,
     provider    TEXT NOT NULL,
@@ -99,6 +111,15 @@ db.exec(`
 const userCols = (db.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((c) => c.name);
 if (!userCols.includes('spotify_client_id')) {
   db.exec('ALTER TABLE users ADD COLUMN spotify_client_id TEXT');
+}
+if (!userCols.includes('spotify_access')) {
+  // 1 = the admin picked this person for the Spotify version (Spotify allows only a few users)
+  db.exec('ALTER TABLE users ADD COLUMN spotify_access INTEGER NOT NULL DEFAULT 0');
+}
+const stateCols = (db.prepare('PRAGMA table_info(oidc_states)').all() as { name: string }[]).map((c) => c.name);
+if (!stateCols.includes('return_to')) {
+  // Where to go after signing in (e.g. https://go.jplay.cloud), when it wasn't the main site.
+  db.exec('ALTER TABLE oidc_states ADD COLUMN return_to TEXT');
 }
 const gameCols = (db.prepare('PRAGMA table_info(finished_games)').all() as { name: string }[]).map((c) => c.name);
 if (!gameCols.includes('status')) {

@@ -22,7 +22,7 @@ import {
 } from '../auth.ts';
 import { all, get, now, run, tx } from '../db.ts';
 import { authorizationUrl, finish, newFlow, provider, publicProviders } from '../oidc.ts';
-import { ADMIN_EMAIL } from '../config.ts';
+import { ADMIN_EMAIL, COOKIE_DOMAIN, GO_URL, SCAN_URL, SPOTIFY_USERS } from '../config.ts';
 
 export const auth = new Hono<Env>();
 
@@ -42,6 +42,9 @@ auth.get('/info', (c) => {
   }
   return c.json({
     providers: publicProviders(),
+    goUrl: GO_URL,
+    scanUrl: SCAN_URL,
+    spotifyUsers: SPOTIFY_USERS,
     invite,
     // Lets the very first admin sign up without an invite.
     bootstrap: !!ADMIN_EMAIL && !get('SELECT 1 FROM users WHERE role = ?', 'admin'),
@@ -159,13 +162,15 @@ auth.get('/oidc/:provider/start', async (c) => {
   const link = c.req.query('link') === '1' ? currentUser(c) : null;
   const flow = newFlow();
   run(
-    'INSERT INTO oidc_states (state, provider, verifier, nonce, invite, link_user, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO oidc_states (state, provider, verifier, nonce, invite, link_user, return_to, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
     flow.state,
     p.id,
     flow.verifier,
     flow.nonce,
     c.req.query('invite') ?? null,
     link?.id ?? null,
+    // Started on go.jplay.cloud: come back there after signing in (the login cookie covers both).
+    c.req.query('from') === 'go' ? GO_URL : null,
     now(),
   );
   return c.redirect(await authorizationUrl(p, flow));
@@ -175,7 +180,7 @@ auth.get('/oidc/:provider/callback', async (c) => {
   const fail = (msg: string, to = '/login') => c.redirect(`${to}?error=${encodeURIComponent(msg)}`);
   const p = provider(c.req.param('provider'));
   const stateId = c.req.query('state') ?? '';
-  const st = get<{ provider: string; verifier: string; nonce: string; invite: string | null; link_user: string | null; created_at: number }>(
+  const st = get<{ provider: string; verifier: string; nonce: string; invite: string | null; link_user: string | null; return_to: string | null; created_at: number }>(
     'SELECT * FROM oidc_states WHERE state = ?',
     stateId,
   );
@@ -264,5 +269,5 @@ auth.get('/oidc/:provider/callback', async (c) => {
 
   if (user.disabled) return fail('This account is turned off. Ask an admin.');
   startSession(c, user.id);
-  return c.redirect('/');
+  return c.redirect(st.return_to === GO_URL && COOKIE_DOMAIN ? `${GO_URL}/` : '/');
 });

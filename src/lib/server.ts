@@ -43,6 +43,8 @@ export interface Me {
   theme: 'dark' | 'light' | 'retro';
   hasPassword: boolean;
   spotifyClientId: string | null;
+  /** May use the Spotify version on jplay.cloud (Spotify allows only a few people). */
+  spotifyAccess: boolean;
   createdAt: number;
 }
 

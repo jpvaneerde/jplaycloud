@@ -64,6 +64,7 @@
         <label class="check pub"><input type="checkbox" checked={p.published} onchange={(e) => togglePublished(p.id, e.currentTarget.checked)} /> Published</label>
         <div class="acts">
           <a class="btn small" href="/admin/playlists/{p.id}" onclick={router.link}>Edit</a>
+          <a class="btn ghost small" href="/cards/{p.id}" onclick={router.link} title="Printable cards with QR codes for the phone scanner">Print cards</a>
           <button class="btn ghost small" onclick={() => exportPlaylist(p)}>Download</button>
           {#if confirmDelete === p.id}
             <button class="btn small danger" onclick={() => del(p.id)}>Delete for good</button>

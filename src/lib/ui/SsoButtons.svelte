@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Provider } from '../server';
+  import { QR_MODE } from '../mode';
 
   let {
     providers,
@@ -9,8 +10,11 @@
   }: { providers: Provider[]; verb?: string; invite?: string | null; disabled?: boolean } = $props();
 
   function href(p: Provider) {
-    const q = invite ? `?invite=${encodeURIComponent(invite)}` : '';
-    return `/api/auth/oidc/${p.id}/start${q}`;
+    const q = new URLSearchParams();
+    if (invite) q.set('invite', invite);
+    if (QR_MODE) q.set('from', 'go'); // come back to go.jplay.cloud after signing in
+    const qs = q.toString();
+    return `/api/auth/oidc/${p.id}/start${qs ? `?${qs}` : ''}`;
   }
 </script>
 

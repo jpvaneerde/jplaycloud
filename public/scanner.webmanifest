@@ -1,0 +1,13 @@
+{
+  "name": "JPlay scanner",
+  "short_name": "JPlay",
+  "description": "Scan a JPlay card, turn your phone over and guess the year.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f111a",
+  "theme_color": "#0f111a",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

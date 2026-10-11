@@ -8,6 +8,8 @@
   import Record from '../../lib/ui/Record.svelte';
   import Timeline, { type Marker } from '../../lib/ui/Timeline.svelte';
   import Options from './Options.svelte';
+  import QRCode from 'qrcode';
+  import { QR_MODE, qrText } from '../../lib/mode';
 
   let optionsOpen = $state(false);
   let historyOpen = $state(false);
@@ -73,7 +75,7 @@
   // Pause the music on reveal (option, on by default) so everyone can talk about the answer.
   let pausedFor = '';
   $effect(() => {
-    if (!revealed || !o.pauseOnReveal || !playKey || pausedFor === playKey) return;
+    if (QR_MODE || !revealed || !o.pauseOnReveal || !playKey || pausedFor === playKey) return;
     pausedFor = playKey;
     player.pause();
   });
@@ -89,13 +91,14 @@
 
   onMount(() => {
     // Straight from "Start game" counts as a click; a restored game always asks first.
-    if (!game.restored && player.playState === 'idle' && navigator.userActivation?.isActive) armed = true;
+    if (QR_MODE) armed = !game.restored; // the phone plays the music: nothing to unlock here
+    else if (!game.restored && player.playState === 'idle' && navigator.userActivation?.isActive) armed = true;
     wakeLock.enable();
     return () => wakeLock.disable();
   });
 
   $effect(() => {
-    if (!armed || !playKey || player.status !== 'ready' || playKey === lastPlayed) return;
+    if (QR_MODE || !armed || !playKey || player.status !== 'ready' || playKey === lastPlayed) return;
     lastPlayed = playKey;
     playError = null;
     player
@@ -114,13 +117,13 @@
   }
 
   function arm() {
-    player.activate();
+    if (!QR_MODE) player.activate();
     armed = true;
     game.restored = false;
   }
 
   function endGame() {
-    player.stop();
+    if (!QR_MODE) player.stop();
     game.end();
   }
 
@@ -129,7 +132,7 @@
     pausing = true;
     playError = null;
     try {
-      await player.stop();
+      if (!QR_MODE) await player.stop();
       await game.pause();
     } catch (e) {
       playError = `Couldn't pause the game: ${(e as Error).message}`;
@@ -143,6 +146,7 @@
     if (t.closest('input, textarea, select, dialog') || !armed) return;
     const k = e.key.toLowerCase();
     if (k === ' ') {
+      if (QR_MODE) return;
       e.preventDefault();
       player.togglePause();
     } else if (k === 'r' && !revealed && game.canReveal) game.reveal();
@@ -160,7 +164,18 @@
   }
 
   const progress = $derived(player.durationMs ? Math.min(1, player.positionMs / player.durationMs) : 0);
-  const playing = $derived(player.playState === 'playing');
+  const playing = $derived(!QR_MODE && player.playState === 'playing');
+
+  // QR game: the song as a QR code; the phone scans it and plays it in Spotify.
+  let qrSvg = $state('');
+  $effect(() => {
+    if (!QR_MODE || !song) return;
+    const text = qrText(song);
+    QRCode.toString(text, { type: 'svg', margin: 1, errorCorrectionLevel: 'M', color: { dark: '#0b0d14', light: '#ffffff' } })
+      .then((svg) => (qrSvg = svg))
+      .catch(() => (qrSvg = ''));
+  });
+
   const nextName = $derived.by(() => {
     if (!turn) return '';
     const i = game.players.findIndex((p) => p.id === turn.playerId);
@@ -267,11 +282,18 @@
   {:else}
     <main class="stage">
       <div class="deck">
+        {#if QR_MODE && !revealed}
+          <div class="qrcard" style:--qr-size={appScoring ? 'min(300px, 26vw, max(190px, calc(100vh - 600px)))' : 'min(380px, 34vw, calc(100vh - 400px))'}>
+            <div class="qr">{@html qrSvg}</div>
+            <p>Scan me, then turn the phone over</p>
+          </div>
+        {:else}
         <Record
           spinning={playing}
           {revealed}
           year={song.year}
           size={appScoring ? 'min(300px, 26vw, max(170px, calc(100vh - 600px)))' : 'min(400px, 34vw, calc(100vh - 390px))'} />
+        {/if}
       </div>
 
       <div class="info">
@@ -295,6 +317,13 @@
           </p>
         {/if}
 
+        {#if QR_MODE}
+          <p class="qr-help muted">
+            {revealed
+              ? 'Stop the music on the phone, or let it play while you talk about it.'
+              : `${active?.name ?? 'Someone'} (or anyone with a phone) scans the code with the phone camera, taps play, turns the phone face down, and the song starts in Spotify.`}
+          </p>
+        {:else}
         <div class="transport">
           <button class="btn small" onclick={() => player.togglePause()} disabled={!armed}>
             {playing ? 'Pause' : player.playState === 'ended' ? 'Play again' : 'Play'} <kbd>Space</kbd>
@@ -306,7 +335,8 @@
             <input type="range" min="0" max="1" step="0.05" value={player.volume} oninput={(e) => player.setVolume(+e.currentTarget.value)} />
           </label>
         </div>
-        {#if playError || player.error}<p class="notice error">{playError ?? player.error}</p>{/if}
+        {/if}
+        {#if playError || (!QR_MODE && player.error)}<p class="notice error">{playError ?? player.error}</p>{/if}
       </div>
     </main>
 
@@ -401,7 +431,7 @@
           <h2 id="resume-title">Ready when you are</h2>
           <p class="muted">Click to let the browser play sound.</p>
         {/if}
-        {#if !player.connected}
+        {#if !QR_MODE && !player.connected}
           <p class="notice">Connect Spotify on this computer to hear the songs.</p>
           <div class="resume-acts">
             <button class="btn primary big" onclick={connectSpotify}>Connect Spotify</button>
@@ -434,6 +464,37 @@
 <Options bind:open={optionsOpen} inGame />
 
 <style>
+  .qrcard {
+    width: var(--qr-size);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.6rem;
+    padding: calc(var(--qr-size) * 0.06);
+    background: #fff;
+    border-radius: 22px;
+    box-shadow: 0 14px 50px rgba(0, 0, 0, 0.45);
+    color: #0b0d14;
+  }
+  .qrcard .qr {
+    width: 100%;
+    aspect-ratio: 1;
+  }
+  .qrcard .qr :global(svg) {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .qrcard p {
+    margin: 0;
+    font-weight: 800;
+    font-size: 0.95rem;
+    text-align: center;
+  }
+  .qr-help {
+    margin: 1rem 0 0;
+    max-width: 46ch;
+  }
   .page {
     min-height: 100vh;
     display: flex;

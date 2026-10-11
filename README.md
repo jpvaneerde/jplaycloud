@@ -46,9 +46,32 @@ npm run dev          # web app on http://127.0.0.1:5173 (Spotify only accepts 12
 | `OIDC_MICROSOFT_CLIENT_ID` / `_SECRET` | none | Turns on "Log in with Microsoft". |
 | `OIDC_MICROSOFT_TENANT` | `common` | Use a tenant ID to allow only your own directory. |
 | `OIDC_PROVIDERS` | none | JSON list for other providers: `[{"id","label","issuer","clientId","clientSecret"}]` |
+| `GO_URL` | `https://go.<host>` | The QR-code version of the game (locally `http://go.localhost:<port>`). |
+| `SCAN_URL` | `https://scanner.<host>` | The phone scanner the QR codes point to (locally `PUBLIC_URL/scanner`). |
+| `COOKIE_DOMAIN` | the host of `PUBLIC_URL` | One login for the main site, `go.` and `scanner.`. Set it empty for a login per host. |
+| `SPOTIFY_USERS` | `5` | How many people the admin can pick for the Spotify version (Spotify's development-mode limit). |
 
 The redirect URI to register with each provider is `PUBLIC_URL/api/auth/oidc/<id>/callback`, for example
 `https://jplay.cloud/api/auth/oidc/google/callback`.
+
+## Three sites, one server
+
+The same pod answers on all three hosts; it picks what to show by host name.
+
+- **jplay.cloud**: the game, playing through Spotify in this browser. Spotify allows only a few people per app in
+  development mode, so only admins, people the admin ticks under Admin → Users, and people with their own Spotify app
+  can play here. Everyone else is pointed to go.jplay.cloud.
+- **go.jplay.cloud**: the same game with the same account, but each turn shows a QR code instead of playing music.
+  Someone scans it with their phone, turns the phone face down, and the song plays in that phone's Spotify app.
+  Nothing on this site talks to Spotify's developer platform.
+- **scanner.jplay.cloud**: the phone scanner. Scan a code (from the go. screen or a printed card), tap play, turn the
+  phone over; after a short countdown the song opens in Spotify. "Show the answer" reveals year, title and artist.
+  No login. Add it to the home screen for quick access.
+
+**Printed cards.** Every song in every playlist gets a 6-letter card code (made when a playlist is saved, and for
+older playlists at startup). Admin → Playlists → **Print cards** makes A4 sheets: QR code on the front, year, title
+and artist on the back. Print double-sided, flip on the long edge, at 100%. Codes never change, so printed cards keep
+working when playlists change.
 
 ## Playlists
 

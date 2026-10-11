@@ -12,6 +12,8 @@
   import Settings from './pages/Settings.svelte';
   import Games from './pages/Games.svelte';
   import Admin from './pages/admin/Admin.svelte';
+  import Cards from './pages/Cards.svelte';
+  import { QR_MODE } from './lib/mode';
 
   let spotifyError = $state<string | null>(null);
   let booting = $state(true);
@@ -59,7 +61,7 @@
 
   $effect(() => {
     if (session.user && !playlists.loaded) playlists.load();
-    if (session.user && player.connected && player.status === 'loading') {
+    if (!QR_MODE && session.user && player.connected && player.status === 'loading') {
       player.init().catch((e) => (player.error = String(e?.message ?? e)));
     }
   });
@@ -81,6 +83,8 @@
   <Games />
 {:else if router.path === '/settings'}
   <Settings {spotifyError} />
+{:else if router.path.startsWith('/cards/')}
+  <Cards id={router.path.split('/')[2]} />
 {:else if router.path.startsWith('/admin')}
   <Admin />
 {:else if !game.ready}

@@ -7,6 +7,8 @@ export interface Song {
   title: string;
   artist: string;
   year: number; // the answer: original release year
+  code?: string; // card code (printed cards, QR game)
+  qr?: string; // what the QR code holds: the scanner link for this card
 }
 
 export interface Playlist {
