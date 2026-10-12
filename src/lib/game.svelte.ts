@@ -6,6 +6,7 @@
 
 import { playlists, type Song } from './playlists.svelte';
 import { api } from './server';
+import { cleanTitle, norm } from './verify';
 
 export interface Options {
   startTokens: number;
@@ -17,12 +18,19 @@ export interface Options {
   yearMax: number;
   uniqueStartYears: boolean;
   shuffleOrder: boolean;
+  randomFirstPlayer: boolean; // someone at random starts instead of the first name
   randomStart: boolean; // start somewhere in the song instead of at 0:00
   randomStartMaxSec: number;
   songLimitSec: number; // 0 = play the whole song
   scoring: 'table' | 'app';
   cardsToWin: number; // 'app' scoring: timeline length that wins (start card included)
   pauseOnReveal: boolean; // stop the music when the answer is shown
+}
+
+/** Main artist + clean title: how JPlay recognises the same song in different versions or playlists. */
+function songKey(s: { artist: string; title: string }) {
+  const main = s.artist.split(/\s+(?:feat\.?|ft\.?|featuring|&|and|with|vs\.?|x)\s+|,/i)[0];
+  return `song:${norm(main)}|${norm(cleanTitle(s.title))}`;
 }
 
 export const DEFAULT_OPTIONS: Options = {
@@ -35,6 +43,7 @@ export const DEFAULT_OPTIONS: Options = {
   yearMax: new Date().getFullYear(),
   uniqueStartYears: true,
   shuffleOrder: false,
+  randomFirstPlayer: false,
   randomStart: false,
   randomStartMaxSec: 45,
   songLimitSec: 0,
@@ -154,21 +163,36 @@ class Game {
 
   active = $derived(this.players.find((p) => p.id === this.turn?.playerId) ?? null);
 
+  /** Every song once, even when playlists overlap: the same Spotify track, or the same song by the
+   *  same main artist in another version (remaster, single vs album) counts as one. */
   pool = $derived.by(() => {
     const seen = new Set<string>();
     const out: Song[] = [];
     for (const id of this.playlistIds) {
       for (const s of playlists.get(id)?.songs ?? []) {
-        if (!seen.has(s.uri)) {
-          seen.add(s.uri);
-          out.push(s);
-        }
+        const key = songKey(s);
+        if (seen.has(s.uri) || seen.has(key)) continue;
+        seen.add(s.uri);
+        seen.add(key);
+        out.push(s);
       }
     }
     return out;
   });
 
-  remaining = $derived(this.pool.filter((s) => !this.played.includes(s.uri)).length);
+  /** Songs already played this game, by track and by artist + title (also for games saved before this check). */
+  private playedKeys = $derived.by(() => {
+    const keys = new Set<string>(this.played);
+    for (const h of this.history) keys.add(songKey(h.song));
+    if (this.turn?.song) keys.add(songKey(this.turn.song));
+    return keys;
+  });
+
+  private isPlayed(s: Song) {
+    return this.playedKeys.has(s.uri) || this.playedKeys.has(songKey(s));
+  }
+
+  remaining = $derived(this.pool.filter((s) => !this.isPlayed(s)).length);
 
   /** The game that just ended was saved to Played games (shown once on the setup screen). */
   justSaved = $state(false);
@@ -364,14 +388,15 @@ class Game {
     this.startedAt = Date.now();
     this.restored = false;
     this.phase = 'game';
-    this.newTurn(this.players[0].id);
+    const first = o.randomFirstPlayer ? Math.floor(Math.random() * this.players.length) : 0;
+    this.newTurn(this.players[first].id);
   }
 
   private drawSong(): Song | null {
-    const left = this.pool.filter((s) => !this.played.includes(s.uri));
+    const left = this.pool.filter((s) => !this.isPlayed(s));
     if (!left.length) return null;
     const song = left[Math.floor(Math.random() * left.length)];
-    this.played.push(song.uri);
+    this.played.push(song.uri, songKey(song));
     return song;
   }
 

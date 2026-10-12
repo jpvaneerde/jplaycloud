@@ -237,6 +237,12 @@
     clearInterval(countTimer);
   });
 
+  const DEFAULT_CARDS = 10;
+  // The full rules live on go.jplay.cloud (locally: go.localhost).
+  const rulesUrl = /^scanner\./i.test(location.hostname)
+    ? `${location.protocol}//${location.host.replace(/^scanner\./i, 'go.')}/how-to-play`
+    : `${location.protocol}//go.localhost${location.port ? ':' + location.port : ''}/how-to-play`;
+
   const decadeHue = (y: number) => ((Math.floor(y / 10) * 10 - 1950) * 23 + 150) % 360;
 </script>
 
@@ -251,8 +257,20 @@
     <section class="center">
       <div class="disc" aria-hidden="true"><i></i></div>
       <h1>Scan a card</h1>
-      <p class="muted">Point your camera at the QR code on a JPlay card. Then turn your phone over, and the song starts in Spotify.</p>
+      <p class="muted">Point your camera at the QR code on the JPlay screen (or on a printed card). Then turn your phone over, and the song starts in Spotify.</p>
       <button class="btn primary big" onclick={startCamera}>Scan a card</button>
+      <details class="opts howto">
+        <summary>How to play</summary>
+        <ol>
+          <li>Open <b>go.jplay.cloud</b> on a laptop or TV everyone can see, add the players and start a game.</li>
+          <li>Each turn, scan the QR code on the screen here and tap <b>play</b>.</li>
+          <li><b>Turn the phone face down.</b> The song starts in Spotify after the countdown, so nobody sees the title.</li>
+          <li>The active player taps where the song fits on their timeline on the big screen. Others can steal with a token.</li>
+          <li>Tap <b>Reveal</b> on the big screen, stop the music here, and tap <b>Next card</b> for the next player.</li>
+          <li>Name the title and artist to earn a token. First to {DEFAULT_CARDS} cards wins.</li>
+        </ol>
+        <a href={rulesUrl} target="_blank" rel="noopener">All the rules</a>
+      </details>
     </section>
   {:else if phase === 'camera'}
     <section class="cam">
@@ -474,6 +492,19 @@
     border: 1px solid var(--line);
     border-radius: 14px;
     padding: 0.6rem 0.9rem;
+  }
+  .howto ol {
+    margin: 0.6rem 0;
+    padding-left: 1.2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    font-size: 0.92rem;
+    line-height: 1.45;
+  }
+  .howto a {
+    font-weight: 700;
+    font-size: 0.92rem;
   }
   .opts summary {
     cursor: pointer;

@@ -50,6 +50,7 @@
     </div>
     <label class="check"><input type="checkbox" bind:checked={o.uniqueStartYears} disabled={inGame} /> Every player gets a different start year</label>
     <label class="check"><input type="checkbox" bind:checked={o.shuffleOrder} disabled={inGame} /> Shuffle the turn order</label>
+    <label class="check"><input type="checkbox" bind:checked={o.randomFirstPlayer} disabled={inGame} /> Pick a random player to start</label>
   </section>
 
   <section>

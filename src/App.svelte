@@ -13,6 +13,7 @@
   import Games from './pages/Games.svelte';
   import Admin from './pages/admin/Admin.svelte';
   import Cards from './pages/Cards.svelte';
+  import HowToPlay from './pages/HowToPlay.svelte';
   import { QR_MODE } from './lib/mode';
 
   let spotifyError = $state<string | null>(null);
@@ -39,6 +40,7 @@
   $effect(() => {
     if (booting) return;
     const isPublic = PUBLIC.includes(router.path);
+    if (router.path === '/how-to-play') return; // the rules are open to everyone
     if (!session.user && !isPublic) {
       const next = router.path === '/' ? '' : `?next=${encodeURIComponent(router.path)}`;
       router.go(`/login${next}`, true);
@@ -73,6 +75,8 @@
 
 {#if booting}
   <div class="boot" aria-busy="true"></div>
+{:else if router.path === '/how-to-play'}
+  <HowToPlay />
 {:else if router.path === '/login'}
   <Login />
 {:else if router.path === '/register'}

@@ -85,7 +85,10 @@
 <Shell>
   <div class="intro">
     <h1>New game</h1>
-    <button class="btn" onclick={() => (optionsOpen = true)}>Game options</button>
+    <div class="intro-acts">
+      <a class="btn ghost" href="/how-to-play" onclick={router.link}>How to play</a>
+      <button class="btn" onclick={() => (optionsOpen = true)}>Game options</button>
+    </div>
   </div>
 
   {#if game.justPaused}
@@ -235,6 +238,10 @@
   }
   h2 {
     font-size: 1.2rem;
+  }
+  .intro-acts {
+    display: flex;
+    gap: 0.5rem;
   }
   .saved-note {
     display: flex;
