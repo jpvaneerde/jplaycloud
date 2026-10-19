@@ -170,7 +170,8 @@ auth.get('/oidc/:provider/start', async (c) => {
     c.req.query('invite') ?? null,
     link?.id ?? null,
     // Started on go.jplay.cloud: come back there after signing in (the login cookie covers both).
-    c.req.query('from') === 'go' ? GO_URL : null,
+    // ?next=/tv/CODE: carry on to that page (signing a TV in from the phone).
+    returnTo(c.req.query('from') === 'go', c.req.query('next')),
     now(),
   );
   return c.redirect(await authorizationUrl(p, flow));
@@ -269,5 +270,25 @@ auth.get('/oidc/:provider/callback', async (c) => {
 
   if (user.disabled) return fail('This account is turned off. Ask an admin.');
   startSession(c, user.id);
-  return c.redirect(st.return_to === GO_URL && COOKIE_DOMAIN ? `${GO_URL}/` : '/');
+  return c.redirect(afterSignIn(st.return_to));
 });
+
+/** Pages single sign-on may return to: only the TV sign-in page for now. */
+function safeNext(next: string | undefined): string {
+  return next && /^\/tv\/[A-Za-z0-9]{4,12}$/.test(next) ? next : '';
+}
+
+function returnTo(fromGo: boolean, next: string | undefined): string | null {
+  const path = safeNext(next);
+  return fromGo ? GO_URL + path : path || null;
+}
+
+function afterSignIn(returnTo: string | null): string {
+  const rt = returnTo ?? '';
+  if (rt.startsWith(GO_URL)) {
+    const path = rt.slice(GO_URL.length) || '/';
+    // The login cookie only covers go.jplay.cloud when it is shared (COOKIE_DOMAIN).
+    return COOKIE_DOMAIN ? GO_URL + path : path;
+  }
+  return rt.startsWith('/') ? rt : '/';
+}

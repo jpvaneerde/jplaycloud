@@ -7,12 +7,14 @@
     verb = 'Continue',
     invite = null,
     disabled = false,
-  }: { providers: Provider[]; verb?: string; invite?: string | null; disabled?: boolean } = $props();
+    next = null,
+  }: { providers: Provider[]; verb?: string; invite?: string | null; disabled?: boolean; next?: string | null } = $props();
 
   function href(p: Provider) {
     const q = new URLSearchParams();
     if (invite) q.set('invite', invite);
     if (QR_MODE) q.set('from', 'go'); // come back to go.jplay.cloud after signing in
+    if (next) q.set('next', next); // e.g. the TV sign-in page
     const qs = q.toString();
     return `/api/auth/oidc/${p.id}/start${qs ? `?${qs}` : ''}`;
   }

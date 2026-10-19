@@ -327,3 +327,41 @@ input[type='range'] {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* ---------- TV mode (src/lib/tv.ts): played with a remote from the sofa ---------- */
+:root {
+  /* The screen height. TV mode may zoom the whole page, and then 100vh is too tall. */
+  --screen-h: 100vh;
+}
+html.tv-zoomed {
+  --screen-h: calc(100vh / var(--tv-zoom, 1));
+}
+html.tv-zoomed body,
+html.tv-zoomed .page {
+  min-height: var(--screen-h) !important;
+}
+html.tv {
+  cursor: none;
+}
+/* Where the remote is: unmistakable from across the room. */
+html.tv :focus {
+  outline: 4px solid var(--accent-2);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 9px color-mix(in srgb, var(--accent-2) 30%, transparent);
+}
+html.tv input:focus,
+html.tv select:focus,
+html.tv textarea:focus {
+  outline-offset: 1px;
+}
+/* Keyboard shortcuts mean nothing on a remote. */
+html.tv kbd {
+  display: none;
+}
+/* Older TV browsers don't know color-mix(): solid fallbacks for what must stay readable. */
+html.tv .arm {
+  background: rgba(8, 9, 14, 0.9);
+}
+html.tv body.light .arm {
+  background: rgba(243, 244, 246, 0.92);
+}

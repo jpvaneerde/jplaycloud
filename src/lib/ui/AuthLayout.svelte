@@ -3,13 +3,14 @@
   import Logo from './Logo.svelte';
   import Record from './Record.svelte';
 
-  let { children }: { children: Snippet } = $props();
+  /** wide: more room for the panel (signing in on a TV). */
+  let { children, wide = false }: { children: Snippet; wide?: boolean } = $props();
 </script>
 
-<div class="auth">
+<div class="auth" class:wide>
   <section class="deck" aria-hidden="true">
     <div class="spin-wrap">
-      <Record spinning size="min(460px, 38vw)" />
+      <Record spinning size={wide ? 'min(400px, 30vw)' : 'min(460px, 38vw)'} />
     </div>
   </section>
   <section class="panel">
@@ -33,6 +34,13 @@
     padding: 24px;
     max-width: 1200px;
     margin: 0 auto;
+  }
+  .auth.wide {
+    grid-template-columns: auto 1fr;
+    max-width: 1240px;
+  }
+  .wide .panel {
+    max-width: 660px;
   }
   .deck {
     display: flex;

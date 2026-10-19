@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=1280">
+  <title>JPlay</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0f111a; color: #fff;
+      font-family: "SamsungOne", system-ui, sans-serif; }
+    .box { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+    img { width: 260px; }
+    p { color: #9aa1b2; font-size: 22px; margin: 18px 0 0; }
+    .err p { color: #f87171; }
+    button { margin-top: 28px; font: inherit; font-size: 22px; font-weight: 700; padding: 14px 34px;
+      border-radius: 14px; border: 0; background: #10b981; color: #052e22; }
+    button:focus { outline: 4px solid #34d399; outline-offset: 4px; }
+  </style>
+</head>
+<body>
+  <div class="box" id="box">
+    <img src="icon.png" alt="JPlay">
+    <p id="msg">Opening JPlay…</p>
+  </div>
+  <script>
+    // Where the game lives. tv=1 turns on TV mode (remote control, sofa-sized layout).
+    var GAME_URL = 'https://go.jplay.cloud/?tv=1';
+
+    function start() {
+      document.getElementById('msg').textContent = 'Opening JPlay…';
+      document.getElementById('box').className = 'box';
+      var old = document.getElementById('retry');
+      if (old) old.parentNode.removeChild(old);
+      // No network: say so instead of showing a blank screen.
+      if (navigator.onLine === false) return fail();
+      location.replace(GAME_URL); // replace: Back never lands on this page again
+    }
+
+    function fail() {
+      document.getElementById('box').className = 'box err';
+      document.getElementById('msg').textContent = "Can't reach JPlay. Check the TV's internet connection.";
+      var b = document.createElement('button');
+      b.id = 'retry';
+      b.textContent = 'Try again';
+      b.onclick = start;
+      document.getElementById('box').appendChild(b);
+      b.focus();
+    }
+
+    // Back on this screen closes the app.
+    document.addEventListener('keydown', function (e) {
+      if (e.keyCode === 10009) {
+        try { tizen.application.getCurrentApplication().exit(); } catch (err) {}
+      } else if (e.keyCode === 13) {
+        var b = document.getElementById('retry');
+        if (b) b.click();
+      }
+    });
+
+    window.addEventListener('online', function () {
+      if (document.getElementById('retry')) start();
+    });
+
+    start();
+  </script>
+</body>
+</html>

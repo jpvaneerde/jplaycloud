@@ -5,6 +5,8 @@
   import { api, type Me, type Provider } from '../lib/server';
   import { router } from '../lib/router.svelte';
   import { session, applyTheme } from '../lib/session.svelte';
+  import { TV_MODE } from '../lib/tv';
+  import TvSignIn from '../lib/ui/TvSignIn.svelte';
 
   let email = $state('');
   let password = $state('');
@@ -12,6 +14,9 @@
   let busy = $state(false);
   let providers = $state<Provider[]>([]);
   let bootstrap = $state(false);
+  // On a TV: sign in with a phone; the email form only when asked for.
+  let useForm = $state(!TV_MODE);
+  const next = $derived(router.query.get('next'));
 
   onMount(async () => {
     const info = await api.get<{ providers: Provider[]; bootstrap: boolean }>('/auth/info').catch(() => null);
@@ -28,7 +33,6 @@
       session.user = r.user;
       applyTheme(r.user.theme);
       await session.load();
-      const next = router.query.get('next');
       router.go(next && next.startsWith('/') && !next.startsWith('//') ? next : '/', true);
     } catch (err) {
       error = (err as Error).message;
@@ -38,7 +42,11 @@
   }
 </script>
 
-<AuthLayout>
+<AuthLayout wide={TV_MODE && !useForm}>
+  {#if !useForm}
+    <TvSignIn />
+    <button class="btn ghost switch" onclick={() => (useForm = true)}>Log in with email and password instead</button>
+  {:else}
   <h1>Log in</h1>
   {#if error}<p class="notice error" role="alert">{error}</p>{/if}
 
@@ -48,7 +56,7 @@
     <button class="btn primary big" type="submit" disabled={busy}>{busy ? 'Logging in…' : 'Log in'}</button>
   </form>
 
-  <SsoButtons {providers} verb="Log in" />
+  {#if !TV_MODE}<SsoButtons {providers} verb="Log in" next={next} />{/if}
 
   <p class="foot muted">
     {#if bootstrap}
@@ -57,6 +65,7 @@
       New to JPlay? You need an invite from someone who plays. Got one? <a href="/register" onclick={router.link}>Create your account</a>.
     {/if}
   </p>
+  {/if}
 </AuthLayout>
 
 <style>
@@ -71,6 +80,9 @@
   }
   .notice {
     margin: 0 0 1rem;
+  }
+  .switch {
+    margin-top: 1.5rem;
   }
   .foot {
     margin: 1.25rem 0 0;

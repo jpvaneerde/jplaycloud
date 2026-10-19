@@ -10,6 +10,7 @@
   import Options from './Options.svelte';
   import QRCode from 'qrcode';
   import { QR_MODE, qrText } from '../../lib/mode';
+  import { TV_MODE } from '../../lib/tv';
   import ScannerInvite from '../../lib/ui/ScannerInvite.svelte';
 
   let scannerOpen = $state(false);
@@ -21,6 +22,10 @@
   let armed = $state(false);
   let playError = $state<string | null>(null);
   let lastPlayed = '';
+
+  // On a TV you pick with the remote; everywhere else you tap or click.
+  const tap = TV_MODE ? 'pick' : 'tap';
+  const Tap = TV_MODE ? 'Pick' : 'Tap';
 
   const turn = $derived(game.turn);
   const song = $derived(turn?.song ?? null);
@@ -47,7 +52,7 @@
   });
   const waitingFor = $derived.by(() => {
     if (!appScoring || !turn || turn.revealed) return '';
-    if (turn.placement == null) return `${active?.name}: tap where the song goes`;
+    if (turn.placement == null) return `${active?.name}: ${tap} where the song goes`;
     const missing = turn.stealers
       .filter((id) => turn.stealSlots?.[id] == null)
       .map((id) => game.players.find((p) => p.id === id)?.name);
@@ -179,6 +184,18 @@
       .catch(() => (qrSvg = ''));
   });
 
+  // The QR code as big as the screen allows; on a TV it's scanned from across the room.
+  // --screen-h is the screen height (see app.css: TV mode can zoom the page).
+  const qrSize = $derived(
+    TV_MODE
+      ? appScoring
+        ? 'min(340px, 30vw, max(200px, calc(var(--screen-h) - 495px)))'
+        : 'min(440px, 40vw, calc(var(--screen-h) - 330px))'
+      : appScoring
+        ? 'min(300px, 26vw, max(190px, calc(100vh - 600px)))'
+        : 'min(380px, 34vw, calc(100vh - 400px))',
+  );
+
   const nextName = $derived.by(() => {
     if (!turn) return '';
     const i = game.players.findIndex((p) => p.id === turn.playerId);
@@ -202,7 +219,7 @@
 
 <svelte:window onkeydown={onKey} />
 
-<div class="page">
+<div class="page" class:tv={TV_MODE}>
   <header class="top">
     <Logo height="1.8em" animated={playing} />
     <div class="meta">
@@ -210,7 +227,7 @@
       <span class="saved" class:failed={game.sync === 'failed'} title="Saved on the JPlay server, so you can carry on after a crash or on another computer">
         {game.sync === 'saving' ? 'Saving…' : game.sync === 'saved' ? 'Game saved' : game.sync === 'failed' ? 'Not saved to the server, retrying' : ''}
       </span>
-      {#if wakeLock.supported}
+      {#if wakeLock.supported && !TV_MODE}
         <span class="lock" class:on={wakeLock.active}>{wakeLock.active ? 'Screen stays on' : 'Screen may sleep'}</span>
       {/if}
     </div>
@@ -287,7 +304,7 @@
     <main class="stage">
       <div class="deck">
         {#if QR_MODE && !revealed}
-          <div class="qrcard" style:--qr-size={appScoring ? 'min(300px, 26vw, max(190px, calc(100vh - 600px)))' : 'min(380px, 34vw, calc(100vh - 400px))'}>
+          <div class="qrcard" style:--qr-size={qrSize}>
             <div class="qr">{@html qrSvg}</div>
             <p>Scan me, then turn the phone over</p>
           </div>
@@ -316,7 +333,7 @@
           <h1 class="title">{active?.name}</h1>
           <p class="artist muted">
             {appScoring
-              ? 'Tap where the song fits on the timeline below. Others can steal before the reveal.'
+              ? `${Tap} where the song fits on the timeline below. Others can steal before the reveal.`
               : 'Place your card on your timeline. Others can steal before the reveal.'}
           </p>
         {/if}
@@ -350,7 +367,7 @@
           <h2>{active.name}'s timeline</h2>
           {#if !revealed && placer}
             <p class="placing" class:steal={placer.id !== active.id}>
-              {placer.id === active.id ? `${placer.name}, tap a spot` : `${placer.name} is stealing: tap a different spot`}
+              {placer.id === active.id ? `${placer.name}, ${tap} a spot` : `${placer.name} is stealing: ${tap} a different spot`}
             </p>
           {/if}
         </div>
@@ -371,7 +388,7 @@
         <button class="btn big skip" disabled={!game.canSkip} onclick={() => game.skip()} title={skipReason}>
           Skip song <span class="cost">−{o.skipCost} <span class="coin"></span></span> <kbd>S</kbd>
         </button>
-        <button class="btn primary big" disabled={!game.canReveal} onclick={() => game.reveal()} title={waitingFor}>Reveal <kbd>R</kbd></button>
+        <button class="btn primary big" disabled={!game.canReveal} onclick={() => game.reveal()} title={waitingFor} data-tv-focus>Reveal <kbd>R</kbd></button>
       {:else}
         <button
           class="btn big"
@@ -380,7 +397,7 @@
           aria-pressed={earnedActive}>
           {active?.name} named title + artist <span class="cost">+1 <span class="coin"></span></span>
         </button>
-        <button class="btn primary big" onclick={() => game.next()}>Next: {nextName} <kbd>N</kbd></button>
+        <button class="btn primary big" onclick={() => game.next()} data-tv-focus>Next: {nextName} <kbd>N</kbd></button>
       {/if}
     </footer>
     {#if waitingFor}<p class="skip-reason muted">{waitingFor}</p>{:else if skipReason}<p class="skip-reason muted">{skipReason}</p>{/if}
@@ -390,7 +407,7 @@
     <aside class="history card" aria-label="Played songs">
       <header>
         <h3>Played songs</h3>
-        <button class="btn ghost small" onclick={() => (historyOpen = false)} aria-label="Close">✕</button>
+        <button class="btn ghost small" onclick={() => (historyOpen = false)} aria-label="Close" data-back>✕</button>
       </header>
       {#if !game.history.length}<p class="muted">Revealed songs show up here after each turn.</p>{/if}
       <ol>
@@ -423,7 +440,7 @@
     <div class="arm" role="presentation" onclick={(e) => e.target === e.currentTarget && (scannerOpen = false)}>
       <div class="resume card scanner-pop" role="dialog" aria-label="Phone scanner">
         <ScannerInvite compact />
-        <button class="btn primary" onclick={() => (scannerOpen = false)}>Done</button>
+        <button class="btn primary" onclick={() => (scannerOpen = false)} data-back>Done</button>
       </div>
     </div>
   {/if}
@@ -491,7 +508,7 @@
   }
   .qrcard .qr {
     width: 100%;
-    aspect-ratio: 1;
+    height: calc(var(--qr-size) * 0.88); /* = its width; for TVs without aspect-ratio */
   }
   .qrcard .qr :global(svg) {
     width: 100%;
@@ -503,6 +520,47 @@
     font-weight: 800;
     font-size: 0.95rem;
     text-align: center;
+  }
+  /* TV: everything on one screen, no scrolling; read from the sofa. */
+  .page.tv {
+    max-width: none;
+    padding: 0 24px;
+  }
+  .page.tv .top {
+    padding: 6px 0;
+  }
+  .page.tv .pl {
+    padding: 0.5rem 0.8rem;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem 0.75rem;
+  }
+  .page.tv .who,
+  .page.tv .pl .row {
+    flex-basis: 100%;
+  }
+  .page.tv .cards-count {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .page.tv .skip-reason {
+    display: none;
+  }
+  .page.tv .stage {
+    padding: 0.6rem 0 0.4rem;
+  }
+  .page.tv .qr-help {
+    display: none;
+  }
+  .page.tv .qrcard p {
+    font-size: 0.8rem;
+  }
+  .page.tv .tl {
+    padding: 0.5rem 1rem 0.25rem;
+  }
+  .page.tv .actions {
+    padding: 0.5rem 0 0.75rem;
   }
   .scanner-pop {
     display: flex;
@@ -876,7 +934,10 @@
   }
   .arm {
     position: fixed;
-    inset: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
     background: color-mix(in srgb, var(--bg) 88%, transparent);
     display: grid;
     place-items: center;

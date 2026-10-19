@@ -69,6 +69,11 @@ The same pod answers on all three hosts; it picks what to show by host name.
   phone over; after a short countdown the song opens in Spotify. "Show the answer" reveals year, title and artist.
   No login. Add it to the home screen for quick access.
 
+**On a TV.** go.jplay.cloud has a TV mode: a layout that fits one screen and reads from the sofa, the remote's arrows
+move between buttons, and you sign the TV in by scanning a code with your phone (`/tv`). It switches on by itself
+in a smart TV's browser, or with `?tv=1` in the address. For Samsung TVs there is a small app in `tizen/`; see
+[tizen/README.md](tizen/README.md) to build and install it.
+
 **Printed cards.** Every song in every playlist gets a 6-letter card code (made when a playlist is saved, and for
 older playlists at startup). Admin → Playlists → **Print cards** makes A4 sheets: QR code on the front, year, title
 and artist on the back. Print double-sided, flip on the long edge, at 100%. Codes never change, so printed cards keep

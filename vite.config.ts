@@ -17,6 +17,8 @@ const scannerDevRoute: Plugin = {
 export default defineConfig({
   plugins: [svelte(), scannerDevRoute],
   build: {
+    // Samsung TVs run older Chromium (2022 models: Chromium 85); newer syntax is rewritten for them.
+    target: ['es2019', 'chrome76', 'safari14', 'firefox78'],
     rollupOptions: {
       input: {
         main: resolve(__dirname, 'index.html'),

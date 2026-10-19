@@ -14,6 +14,7 @@
   import Admin from './pages/admin/Admin.svelte';
   import Cards from './pages/Cards.svelte';
   import HowToPlay from './pages/HowToPlay.svelte';
+  import TvLink from './pages/TvLink.svelte';
   import { QR_MODE } from './lib/mode';
 
   let spotifyError = $state<string | null>(null);
@@ -89,6 +90,8 @@
   <Settings {spotifyError} />
 {:else if router.path.startsWith('/cards/')}
   <Cards id={router.path.split('/')[2]} />
+{:else if router.path === '/tv' || router.path.startsWith('/tv/')}
+  <TvLink code={router.path.split('/')[2] ?? ''} />
 {:else if router.path.startsWith('/admin')}
   <Admin />
 {:else if !game.ready}

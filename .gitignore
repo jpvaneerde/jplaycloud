@@ -25,3 +25,8 @@ dist-ssr
 
 # Local database
 data/
+
+# Tizen TV app build output
+*.wgt
+tizen/.buildResult/
+tizen/.sign/

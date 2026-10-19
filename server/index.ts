@@ -9,6 +9,7 @@ import { ADMIN_EMAIL, GO_ORIGIN, GO_URL, OIDC_PROVIDERS, PORT, PUBLIC_ORIGIN, PU
 import { backfillCards } from './cards.ts';
 import { userCount } from './auth.ts';
 import { auth, me } from './routes/auth.ts';
+import { tv } from './routes/tv.ts';
 import { admin, cards, gameSave, history, invites, playlists } from './routes/app.ts';
 import './db.ts';
 
@@ -49,6 +50,7 @@ app.use('/api/*', async (c, next) => {
   await next();
 });
 
+app.route('/api/auth/tv', tv); // sign in on a TV with a phone
 app.route('/api/auth', auth);
 app.route('/api/me', me);
 app.route('/api/invites', invites);
