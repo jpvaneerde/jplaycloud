@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- JPlay for Samsung TVs (Tizen). A small launcher that opens go.jplay.cloud in TV mode:
-     the game itself comes from the server, so updates never need a reinstall. -->
+<!-- JPlay for Samsung TVs (Tizen). A hosted web app: it opens go.jplay.cloud in TV mode
+     (tv=1: remote control, sofa-sized layout). The game comes from the server, so updates
+     never need a reinstall. -->
 <widget xmlns="http://www.w3.org/ns/widgets" xmlns:tizen="http://tizen.org/ns/widgets" id="https://jplay.cloud/tv" version="1.0.0" viewmodes="maximized">
     <tizen:application id="JPlayTVapp.JPlay" package="JPlayTVapp" required_version="3.0"/>
-    <content src="index.html"/>
+    <content src="https://go.jplay.cloud/?tv=1"/>
     <feature name="http://tizen.org/feature/screen.size.normal.1080.1920"/>
     <icon src="icon.png"/>
     <name>JPlay</name>

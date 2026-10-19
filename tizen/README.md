@@ -4,8 +4,8 @@ A small Tizen app that opens **go.jplay.cloud in TV mode**: the QR-code version 
 and played with the remote. Phones scan each song's QR code with the scanner (scanner.jplay.cloud) and play it in
 Spotify, so nothing plays on the TV.
 
-The app is only a launcher: the game comes from the server, so updating JPlay never needs a reinstall. Reinstall
-only when something in this folder changes.
+The app opens the site directly (`content src` in `config.xml`): the game comes from the server, so updating JPlay
+never needs a reinstall. Reinstall only when something in this folder changes.
 
 ## On the TV
 
@@ -43,6 +43,7 @@ You need Tizen Studio (or the Tizen extension for VS Code, which uses it) with t
 
 - **Firmware updates** sometimes switch developer mode off. The installed app keeps working; you only need developer
   mode again to install a new version.
-- **Testing another server:** change `GAME_URL` at the top of `index.html`, and add its host to
-  `tizen:allow-navigation` in `config.xml`.
+- **Testing another server:** change `content src` in `config.xml` and add its host to `tizen:allow-navigation`.
+- **Something wrong on the TV?** Use the extension's **Debug Project**: it opens Chrome's inspector on the app, with
+  the console and network requests.
 - **Older TVs:** the game needs a Samsung TV from 2022 or later (Tizen 6.5). Some older models may work.
